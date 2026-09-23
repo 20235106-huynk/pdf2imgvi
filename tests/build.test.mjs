@@ -35,13 +35,17 @@ test("dist contains every extension entry", async () => {
       .map((name) => readFile(dist(`assets/${name}`), "utf8")),
   )
   const javascript = scripts.join("\n")
+  const workerAsset = assetNames.find((name) => /^pdf\.worker\.min-.+\.mjs$/.test(name))
+  assert.ok(workerAsset, "PDF.js worker must be emitted locally")
+  assert.ok(javascript.includes(workerAsset), "workspace bundle must reference the local worker")
   for (const text of [
     "pdf2imgvi",
     "Open Translator",
     "Settings",
     "Translate PDFs to Vietnamese",
     "Choose PDF",
-    "Nano Banana Lite 2",
+    "Previous",
+    "Next",
     "Save Changes",
     "Reset to Defaults",
     "Session only",
