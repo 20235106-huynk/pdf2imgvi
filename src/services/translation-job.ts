@@ -46,6 +46,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
   const aborter = new AbortController()
   let stopping = false
   let cancellation: Promise<void> | null = null
+  const finalized = new Set<string>()
 
   function emit(): void {
     job.completedPages = job.pages.filter((page) => page.status === "completed").length
@@ -85,7 +86,8 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
 
   async function finishBatch(status: GeminiBatchStatus): Promise<void> {
     const batch = job.batches.find((item) => item.id === status.name)
-    if (!batch) return
+    if (!batch || finalized.has(status.name)) return
+    finalized.add(status.name)
     batchState(status.name, status.state)
     if (status.state === "JOB_STATE_SUCCEEDED") {
       try {
@@ -160,11 +162,11 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
   })()
 
   const finished = submission.then(async () => {
-    while (!stopping && job.batches.some((batch) => !TERMINAL.has(batch.state))) {
+    while (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
       for (const batch of job.batches) {
-        if (stopping || TERMINAL.has(batch.state)) continue
+        if (TERMINAL.has(batch.state)) continue
         try {
-          const status = await ports.client.getBatch(batch.id, aborter.signal)
+          const status = await ports.client.getBatch(batch.id, stopping ? undefined : aborter.signal)
           if (TERMINAL.has(status.state)) {
             await finishBatch(status)
           } else {
@@ -176,12 +178,10 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
             }
           }
         } catch {
-          if (!stopping) {
-            await finishBatch({ name: batch.id, state: "JOB_STATE_FAILED" })
-          }
+          if (!TERMINAL.has(batch.state)) batchState(batch.id, "STATUS_UNAVAILABLE")
         }
       }
-      if (!stopping && job.batches.some((batch) => !TERMINAL.has(batch.state))) {
+      if (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
         await ports.sleep(input.settings.pollingIntervalMs)
       }
     }
@@ -204,6 +204,10 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         if (TERMINAL.has(batch.state)) continue
         try {
           await ports.client.cancelBatch(batch.id)
+        } catch {
+          batchState(batch.id, "CANCEL_UNCONFIRMED")
+        }
+        try {
           const status = await ports.client.getBatch(batch.id)
           if (TERMINAL.has(status.state)) await finishBatch(status)
           else batchState(batch.id, status.state)
@@ -215,7 +219,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         if (!item.batchId && ["pending", "rendering", "queued"].includes(item.status)) mark(item.pageNumber, "cancelled")
       }
       emit()
-    })()
+    })().finally(() => { cancellation = null })
     return cancellation
   }
 

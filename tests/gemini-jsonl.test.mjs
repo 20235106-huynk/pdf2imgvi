@@ -47,7 +47,7 @@ test("maps reversed image results by key and isolates keyed failures", async () 
   assert.ok(results[3].error)
 })
 
-test("duplicate and unknown keys cannot silently misattribute images", async () => {
+test("duplicate, unknown, malformed keys and bad rows cannot misattribute images", async () => {
   const { parseBatchResults } = await moduleUnderTest()
   const image = { response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("ok") } }] } }] } }
   const duplicate = [
@@ -59,8 +59,17 @@ test("duplicate and unknown keys cannot silently misattribute images", async () 
   assert.equal(result[0].image, undefined)
   assert.ok(result[1].error)
 
-  await assert.rejects(
-    parseBatchResults(JSON.stringify({ key: "job-7:page:99", ...image }), "job-7", [1]),
-    /unknown result key/i,
-  )
+  const mixed = [
+    JSON.stringify({ key: "job-7:page:1", ...image }),
+    "not JSON",
+    JSON.stringify({ key: "job-7:page:99", ...image }),
+    JSON.stringify({ key: "job-7:page:02", ...image }),
+    JSON.stringify({ key: "job-7:page:2e0", ...image }),
+    JSON.stringify({ key: "job-7:page:+2", ...image }),
+    JSON.stringify({ key: "job-7:page: 2", ...image }),
+  ].join("\n")
+  const preserved = await parseBatchResults(mixed, "job-7", [1, 2])
+  assert.equal(await preserved[0].image.text(), "ok")
+  assert.equal(preserved[1].image, undefined)
+  assert.match(preserved[1].error, /no result/i)
 })

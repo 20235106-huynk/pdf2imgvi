@@ -164,3 +164,93 @@ test("cancel preserves a batch result that completes before cancellation confirm
   assert.equal(raceSnapshots.at(-1).pages[0].status, "completed")
   assert.deepEqual(race.saved.map((row) => row.pageNumber), [1])
 })
+
+test("a temporary status error keeps the remote batch registered and eventually collects its image", async () => {
+  const snapshots = []
+  const registrations = []
+  const removals = []
+  let calls = 0
+  const { saved, ports } = fixturePorts({
+    registerBatch: async (_tab, name) => registrations.push(name),
+    unregisterBatch: async (_tab, name) => removals.push(name),
+    client: {
+      getBatch: async (name) => {
+        calls += 1
+        if (calls === 1) {
+          assert.deepEqual(removals, [])
+          throw new Error("offline")
+        }
+        return { name, state: "JOB_STATE_SUCCEEDED", responseFile: "files/output" }
+      },
+      downloadResults: async () => JSON.stringify({
+        key: `${snapshots[0].id}:page:1`,
+        response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("one") } }] } }] },
+      }),
+    },
+  })
+  const run = await start(input([1], (job) => snapshots.push(job)), ports)
+  await run.finished
+  assert.equal(calls, 2)
+  assert.deepEqual(registrations, ["batches/b1"])
+  assert.deepEqual(removals, ["batches/b1"])
+  assert.deepEqual(saved.map((row) => row.pageNumber), [1])
+  assert.equal(snapshots.at(-1).status, "completed")
+})
+
+test("pending cancellation keeps polling and collects a later success even if cancel call fails", async () => {
+  const snapshots = []
+  const { saved, ports } = fixturePorts()
+  let firstPoll
+  let releaseSleep
+  const polled = new Promise((resolve) => { firstPoll = resolve })
+  const heldSleep = new Promise((resolve) => { releaseSleep = resolve })
+  let calls = 0
+  ports.client.getBatch = async (name) => {
+    calls += 1
+    if (calls === 1) { firstPoll(); return { name, state: "JOB_STATE_PENDING" } }
+    if (calls === 2) return { name, state: "JOB_STATE_RUNNING" }
+    return { name, state: "JOB_STATE_SUCCEEDED", responseFile: "files/output" }
+  }
+  ports.client.cancelBatch = async () => { throw new Error("temporary cancel error") }
+  ports.client.downloadResults = async () => JSON.stringify({
+    key: `${snapshots[0].id}:page:1`,
+    response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("one") } }] } }] },
+  })
+  ports.sleep = async () => heldSleep
+  const run = await start(input([1], (job) => snapshots.push(job)), ports)
+  await polled
+  await run.cancel()
+  releaseSleep()
+  await run.finished
+  assert.ok(calls >= 3)
+  assert.deepEqual(saved.map((row) => row.pageNumber), [1])
+  assert.equal(snapshots.at(-1).status, "completed")
+})
+
+test("an unconfirmed cancellation can be explicitly requested again", async () => {
+  const snapshots = []
+  const { ports } = fixturePorts()
+  let firstPoll
+  let releaseSleep
+  const polled = new Promise((resolve) => { firstPoll = resolve })
+  const heldSleep = new Promise((resolve) => { releaseSleep = resolve })
+  let statusCalls = 0
+  let cancelCalls = 0
+  ports.client.getBatch = async (name) => {
+    statusCalls += 1
+    if (statusCalls === 1) { firstPoll(); return { name, state: "JOB_STATE_PENDING" } }
+    if (statusCalls === 2) return { name, state: "JOB_STATE_RUNNING" }
+    return { name, state: "JOB_STATE_CANCELLED" }
+  }
+  ports.client.cancelBatch = async () => { cancelCalls += 1 }
+  ports.sleep = async () => heldSleep
+  const run = await start(input([1], (job) => snapshots.push(job)), ports)
+  await polled
+  await run.cancel()
+  assert.equal(snapshots.at(-1).status, "running")
+  await run.cancel()
+  releaseSleep()
+  await run.finished
+  assert.equal(cancelCalls, 2)
+  assert.equal(snapshots.at(-1).pages[0].status, "cancelled")
+})

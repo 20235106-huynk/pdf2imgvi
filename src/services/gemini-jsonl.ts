@@ -62,24 +62,19 @@ export async function parseBatchResults(
   jobId: string,
   expectedPages: readonly number[],
 ): Promise<BatchPageResult[]> {
-  const expected = new Set(expectedPages)
+  const expectedKeys = new Map(expectedPages.map((pageNumber) => [`${jobId}:page:${pageNumber}`, pageNumber]))
   const results = new Map<number, BatchPageResult>()
   for (const line of jsonl.split(/\r?\n/).filter((item) => item.trim())) {
     let parsed: unknown
     try {
       parsed = JSON.parse(line)
     } catch {
-      throw new Error("Invalid Gemini result JSONL")
+      continue
     }
     const row = record(parsed)
     const key = row?.key
-    const prefix = `${jobId}:page:`
-    const pageNumber = typeof key === "string" && key.startsWith(prefix)
-      ? Number(key.slice(prefix.length))
-      : NaN
-    if (!Number.isSafeInteger(pageNumber) || !expected.has(pageNumber)) {
-      throw new Error("Unknown result key from Gemini")
-    }
+    const pageNumber = typeof key === "string" ? expectedKeys.get(key) : undefined
+    if (pageNumber === undefined) continue
     if (results.has(pageNumber)) {
       results.set(pageNumber, { pageNumber, error: "Duplicate result for page" })
       continue

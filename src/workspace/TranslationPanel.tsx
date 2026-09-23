@@ -79,7 +79,14 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
       const client = createGeminiBatchClient(apiKey)
       const run = startTranslation({
         pdf, fileName, pages: [...selectedPages], settings, apiKey, tabId,
-        onChange: (next) => { jobRef.current = next; setJob(next) },
+        onChange: (next) => {
+          const previousCompleted = jobRef.current?.completedPages ?? 0
+          jobRef.current = next
+          setJob(next)
+          if (next.completedPages > previousCompleted) {
+            void refreshSaved().catch(() => setError("Could not load saved results."))
+          }
+        },
       }, {
         renderPage: renderPdfPage,
         client,
@@ -117,12 +124,14 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
       const unconfirmed = jobRef.current?.batches.filter((batch) => !TERMINAL_BATCH.has(batch.state)) ?? []
       if (unconfirmed.length) {
         setError(`Cancellation is not confirmed for ${unconfirmed.length} batch(es). They may still be processing.`)
+        setCancelRequested(false)
       }
       const active = jobRef.current?.status === "running"
       setRunning(active)
       onRunningChange(active)
     } catch {
       setError("Could not confirm cancellation. Gemini batches may still be processing.")
+      setCancelRequested(false)
     } finally {
       setCancelling(false)
     }
