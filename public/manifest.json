@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "pdf2imgvi",
+  "version": "0.1.0",
+  "description": "Translate PDFs to Vietnamese.",
+  "permissions": ["storage", "downloads"],
+  "action": {
+    "default_title": "pdf2imgvi",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
