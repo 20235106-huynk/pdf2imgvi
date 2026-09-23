@@ -89,6 +89,7 @@ export function SettingsPage() {
       <p className="mt-2 text-sm text-muted-foreground">Choose how your translations will run.</p>
 
       <form onSubmit={save} className="mt-8 space-y-8" aria-busy={saving}>
+        <fieldset disabled={saving} className="min-w-0 space-y-8 border-0 p-0">
         <section className="space-y-5 border-b pb-8" aria-labelledby="engine-heading">
           <h2 id="engine-heading" className="text-lg font-semibold">Translate Engine</h2>
           <label className="block text-sm font-medium" htmlFor="model">
@@ -304,6 +305,7 @@ export function SettingsPage() {
             ))}
           </div>
         </details>
+        </fieldset>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pb-8">
           <Button
