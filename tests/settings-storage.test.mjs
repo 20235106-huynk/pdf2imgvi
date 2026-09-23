@@ -45,7 +45,12 @@ test("settings load defaults, normalize before saving, and reset", async () => {
   const { local, session } = installStorage()
 
   assert.deepEqual(await getSettings(), DEFAULT_SETTINGS)
-  await saveSettings({ ...DEFAULT_SETTINGS, concurrency: 99, sourceLanguage: "ja" })
+  await saveSettings({
+    ...DEFAULT_SETTINGS,
+    concurrency: 99,
+    sourceLanguage: "ja",
+    apiKey: "must-not-persist",
+  })
   assert.equal((await getSettings()).concurrency, 20)
   assert.equal((await getSettings()).sourceLanguage, "ja")
   assert.equal("apiKey" in local.values.get("appSettings"), false)

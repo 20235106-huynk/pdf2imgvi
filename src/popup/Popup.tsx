@@ -13,14 +13,9 @@ export function Popup() {
   return (
     <main className="flex w-80 flex-col gap-4 p-5">
       <h1 className="text-xl font-semibold">pdf2imgvi</h1>
-      <div className="flex flex-col gap-2">
-        <Button type="button" onClick={openTranslator}>
-          Open Translator
-        </Button>
-        <Button type="button" variant="outline">
-          Settings
-        </Button>
-      </div>
+      <Button type="button" onClick={openTranslator}>
+        Open Translator
+      </Button>
     </main>
   )
 }

@@ -41,9 +41,18 @@ test("dist contains every extension entry", async () => {
     "Settings",
     "Translate PDFs to Vietnamese",
     "Choose PDF",
+    "Nano Banana Lite 2",
+    "Save Changes",
+    "Reset to Defaults",
+    "Session only",
+    "Clear Translation Cache",
   ]) {
     assert.match(javascript, new RegExp(text))
   }
+
+  const popupScript = assetNames.find((name) => /^popup-.+\.js$/.test(name))
+  assert.ok(popupScript)
+  assert.doesNotMatch(await readFile(dist(`assets/${popupScript}`), "utf8"), /Settings/)
 })
 
 test("declared PNG icons have their advertised dimensions", async () => {
