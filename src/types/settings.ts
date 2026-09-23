@@ -1,5 +1,12 @@
 export type ApiKeyStorageMode = "local" | "session"
 export type OutputQuality = "standard" | "high" | "very-high"
+export type TranslationQuality = OutputQuality
+
+export const QUALITY_TO_IMAGE_SIZE = {
+  standard: "1K",
+  high: "2K",
+  "very-high": "4K",
+} as const
 
 export interface AppSettings {
   geminiModel: string
@@ -64,19 +71,33 @@ export function normalizeSettings(value: unknown): AppSettings {
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
 
   const model = input.geminiModel ?? input.modelId
+  const geminiModel = isOption(model, MODEL_OPTIONS)
+    ? model
+    : DEFAULT_SETTINGS.geminiModel
+
+  let quality = isOption(input.quality, QUALITY_OPTIONS)
+    ? input.quality
+    : DEFAULT_SETTINGS.quality
+
+  switch (geminiModel) {
+    case "gemini-3.1-flash-lite-image":
+    case "gemini-2.5-flash-image":
+      quality = "standard"
+      break
+    case "gemini-3.1-flash-image":
+    case "gemini-3-pro-image":
+      break
+  }
+
   return {
-    geminiModel: isOption(model, MODEL_OPTIONS)
-      ? model
-      : DEFAULT_SETTINGS.geminiModel,
+    geminiModel,
     sourceLanguage: isOption(input.sourceLanguage, SOURCE_LANGUAGE_OPTIONS)
       ? input.sourceLanguage
       : DEFAULT_SETTINGS.sourceLanguage,
     targetLanguage: isOption(input.targetLanguage, TARGET_LANGUAGE_OPTIONS)
       ? input.targetLanguage
       : DEFAULT_SETTINGS.targetLanguage,
-    quality: isOption(input.quality, QUALITY_OPTIONS)
-      ? input.quality
-      : DEFAULT_SETTINGS.quality,
+    quality,
     batchSize:
       typeof input.batchSize === "number" && Number.isSafeInteger(input.batchSize)
         ? Math.max(MIN_BATCH_SIZE, Math.min(MAX_BATCH_SIZE, input.batchSize))

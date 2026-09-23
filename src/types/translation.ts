@@ -1,3 +1,5 @@
+import type { OutputQuality } from "./settings.ts"
+
 export type PageStatus =
   | "pending"
   | "rendering"
@@ -31,6 +33,8 @@ export interface TranslationJob {
   cancelledPages: number
   status: "running" | "completed" | "failed" | "cancelled"
   stage: "preparing" | "submitted" | "waiting" | "finished"
+  geminiModel?: string
+  outputQuality?: OutputQuality
 }
 
 export interface BatchPageResult {

@@ -359,3 +359,52 @@ test("persists batch record immediately after submission", async () => {
   assert.deepEqual(createdBatches[0].pageNumbers, [1])
 })
 
+test("job records and uses outputQuality and geminiModel for rendering and batch submission", async () => {
+  let renderedQuality = null
+  let submittedModel = null
+  let uploadedJsonl = null
+  let createdJobRecord = null
+
+  const { ports } = fixturePorts({
+    renderPage: async (_pdf, pNum, quality) => {
+      renderedQuality = quality
+      return { pageNumber: pNum, blob: new Blob(["img"], { type: "image/png" }), width: 10, height: 10 }
+    },
+    createJob: async (job, _file, _settings) => {
+      createdJobRecord = { ...job }
+    },
+    client: {
+      uploadFile: async (blob, name) => {
+        if (name.endsWith(".jsonl")) uploadedJsonl = await blob.text()
+        return { name: `files/${name}`, uri: `https://files/${name}` }
+      },
+      submitBatch: async (model, _name) => {
+        submittedModel = model
+        return "batches/b1"
+      },
+      getBatch: async (name) => ({ name, state: "completed", responseFile: "files/res1" }),
+      downloadResults: async () =>
+        JSON.stringify({
+          key: `${createdJobRecord.id}:page:1`,
+          response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("res") } }] } }] },
+        }),
+    },
+  })
+
+  const customInput = input([1], () => {})
+  customInput.settings = {
+    ...customInput.settings,
+    geminiModel: "gemini-3-pro-image",
+    quality: "very-high",
+  }
+
+  const run = await start(customInput, ports)
+  await run.finished
+
+  assert.equal(createdJobRecord.outputQuality, "very-high")
+  assert.equal(createdJobRecord.geminiModel, "gemini-3-pro-image")
+  assert.equal(renderedQuality, "very-high")
+  assert.equal(submittedModel, "gemini-3-pro-image")
+  assert.match(uploadedJsonl, /"imageSize":"4K"/)
+})
+

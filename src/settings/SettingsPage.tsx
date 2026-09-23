@@ -11,7 +11,6 @@ import {
   MIN_BATCH_SIZE,
   MIN_POLLING_INTERVAL_MS,
   MODEL_OPTIONS,
-  QUALITY_OPTIONS,
   SOURCE_LANGUAGE_OPTIONS,
   TARGET_LANGUAGE_OPTIONS,
   normalizeSettings,
@@ -35,6 +34,17 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
     void Promise.all([getSettings(), getApiKey()])
       .then(([settings, key]) => {
         if (!active) return
+        switch (settings.geminiModel) {
+          case "gemini-3.1-flash-lite-image":
+          case "gemini-2.5-flash-image":
+            if (settings.quality !== "standard") {
+              settings.quality = "standard"
+            }
+            break
+          case "gemini-3.1-flash-image":
+          case "gemini-3-pro-image":
+            break
+        }
         setDraft(settings)
         setApiKey(key ?? "")
       })
@@ -48,6 +58,24 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
       active = false
     }
   }, [])
+
+  function handleModelChange(model: string) {
+    setDraft((current) => {
+      let quality = current.quality
+      switch (model) {
+        case "gemini-3.1-flash-image":
+        case "gemini-3-pro-image":
+          break
+        case "gemini-3.1-flash-lite-image":
+        case "gemini-2.5-flash-image":
+        default:
+          quality = "standard"
+          break
+      }
+      return { ...current, geminiModel: model, quality }
+    })
+    setFeedback("")
+  }
 
   function update<K extends keyof AppSettings>(field: K, value: AppSettings[K]) {
     setDraft((current) => ({ ...current, [field]: value }))
@@ -101,7 +129,7 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
               id="model"
               className={controlClass}
               value={draft.geminiModel}
-              onChange={(event) => update("geminiModel", event.target.value)}
+              onChange={(event) => handleModelChange(event.target.value)}
             >
               {MODEL_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -187,17 +215,47 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
 
         <fieldset className="space-y-2 border-b pb-8 text-sm">
           <legend className="mb-2 text-lg font-semibold">Output Quality</legend>
-          {QUALITY_OPTIONS.map((option) => (
-            <label key={option.value} className="flex items-center gap-2">
+          {(draft.geminiModel === "gemini-3.1-flash-image" || draft.geminiModel === "gemini-3-pro-image") ? (
+            <>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="quality"
+                  checked={draft.quality === "standard"}
+                  onChange={() => update("quality", "standard")}
+                />
+                <span>Standard <span className="text-xs text-muted-foreground">1K</span></span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="quality"
+                  checked={draft.quality === "high"}
+                  onChange={() => update("quality", "high")}
+                />
+                <span>High <span className="text-xs text-muted-foreground">2K</span></span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="quality"
+                  checked={draft.quality === "very-high"}
+                  onChange={() => update("quality", "very-high")}
+                />
+                <span>Very High <span className="text-xs text-muted-foreground">4K</span></span>
+              </label>
+            </>
+          ) : (
+            <label className="flex items-center gap-2">
               <input
                 type="radio"
                 name="quality"
-                checked={draft.quality === option.value}
-                onChange={() => update("quality", option.value)}
+                checked={true}
+                onChange={() => update("quality", "standard")}
               />
-              {option.label}
+              <span>Standard <span className="text-xs text-muted-foreground">1K</span></span>
             </label>
-          ))}
+          )}
         </fieldset>
 
         <section className="space-y-4 border-b pb-8" aria-labelledby="batch-heading">

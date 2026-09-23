@@ -59,6 +59,8 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     cancelledPages: 0,
     status: "running",
     stage: "preparing",
+    geminiModel: input.settings.geminiModel,
+    outputQuality: input.settings.quality,
   }
   const aborter = new AbortController()
   let stopping = false
@@ -159,7 +161,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         if (stopping) break
         mark(pageNumber, "rendering")
         try {
-          const rendered = await ports.renderPage(input.pdf, pageNumber, input.settings.quality)
+          const rendered = await ports.renderPage(input.pdf, pageNumber, job.outputQuality ?? input.settings.quality)
           if (stopping) { mark(pageNumber, "cancelled"); break }
           const file = await ports.client.uploadFile(rendered.blob, `page-${pageNumber}.png`, aborter.signal)
           if (stopping) { mark(pageNumber, "cancelled"); break }
@@ -175,16 +177,16 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
       }
       if (!uploads.length) continue
       try {
-        const jsonl = buildBatchJsonl(job.id, uploads, input.settings.sourceLanguage, input.settings.targetLanguage)
+        const jsonl = buildBatchJsonl(job.id, uploads, input.settings.sourceLanguage, input.settings.targetLanguage, job.outputQuality ?? input.settings.quality)
         const file = await ports.client.uploadFile(jsonl, `batch-${job.batches.length + 1}.jsonl`, aborter.signal)
-        const name = await ports.client.submitBatch(input.settings.geminiModel, file.name, aborter.signal)
+        const name = await ports.client.submitBatch(job.geminiModel ?? input.settings.geminiModel, file.name, aborter.signal)
         if (ports.createBatchRecord) {
           const now = Date.now()
           await ports.createBatchRecord({
             id: crypto.randomUUID(),
             jobId: job.id,
             batchName: name,
-            model: input.settings.geminiModel,
+            model: job.geminiModel ?? input.settings.geminiModel,
             pageNumbers: uploads.map((upload) => upload.pageNumber),
             status: "submitted",
             createdAt: now,

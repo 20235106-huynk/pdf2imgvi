@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie"
 
-import type { AppSettings } from "../types/settings.ts"
+import type { AppSettings, OutputQuality } from "../types/settings.ts"
 import type { PageStatus, TranslationJob } from "../types/translation.ts"
 
 export type StoredJobStatus = "preparing" | "submitted" | "processing" | "completed" | "completed_with_errors" | "failed"
@@ -14,6 +14,7 @@ export interface StoredJob {
   sourceLanguage: string
   targetLanguage: string
   geminiModel: string
+  outputQuality?: OutputQuality
   status: StoredJobStatus
   completedPages: number
   failedPages: number
@@ -110,7 +111,8 @@ export async function createJob(
       selectedPages: job.pages.map((page) => page.pageNumber),
       sourceLanguage: settings.sourceLanguage,
       targetLanguage: settings.targetLanguage,
-      geminiModel: settings.geminiModel,
+      geminiModel: job.geminiModel ?? settings.geminiModel,
+      outputQuality: job.outputQuality ?? settings.quality,
       status: "preparing",
       completedPages: 0,
       failedPages: 0,

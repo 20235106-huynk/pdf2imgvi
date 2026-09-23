@@ -309,11 +309,12 @@ export async function retryFailedPages(options: RetryOptions): Promise<void> {
     if (options.signal?.aborted) return
     const uploads: { pageNumber: number; fileUri: string; mimeType: string }[] = []
 
+    const quality = job.outputQuality ?? options.settings.quality
     for (const pageNumber of chunk) {
       if (options.signal?.aborted) return
       await updatePageRecord(job.id, pageNumber, { status: "rendering" })
       try {
-        const rendered = await renderPage(options.pdf as PDFDocumentProxy, pageNumber, options.settings.quality)
+        const rendered = await renderPage(options.pdf as PDFDocumentProxy, pageNumber, quality)
         const file = await client.uploadFile(rendered.blob, `page-${pageNumber}.png`, options.signal)
         uploads.push({ pageNumber, fileUri: file.uri, mimeType: rendered.blob.type })
         await updatePageRecord(job.id, pageNumber, { status: "queued" })
@@ -328,7 +329,7 @@ export async function retryFailedPages(options: RetryOptions): Promise<void> {
     if (uploads.length === 0) continue
 
     try {
-      const jsonl = buildBatchJsonl(job.id, uploads, options.settings.sourceLanguage, options.settings.targetLanguage)
+      const jsonl = buildBatchJsonl(job.id, uploads, options.settings.sourceLanguage, options.settings.targetLanguage, quality)
       const file = await client.uploadFile(jsonl, `batch-retry-${Date.now()}.jsonl`, options.signal)
       const batchName = await client.submitBatch(job.geminiModel, file.name, options.signal)
 

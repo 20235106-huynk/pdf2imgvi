@@ -1,4 +1,5 @@
 import type { BatchPageResult } from "../types/translation.ts"
+import { QUALITY_TO_IMAGE_SIZE, type OutputQuality } from "../types/settings.ts"
 import { translationPrompt } from "./translation-prompt.ts"
 
 export function splitIntoBatches<T>(items: readonly T[], size: number): T[][] {
@@ -12,7 +13,9 @@ export function buildBatchJsonl(
   pages: readonly { pageNumber: number; fileUri: string; mimeType: string }[],
   sourceLanguage: string,
   targetLanguage: string,
+  quality: OutputQuality = "standard",
 ): Blob {
+  const imageSize = QUALITY_TO_IMAGE_SIZE[quality] ?? "1K"
   const text = pages.map(({ pageNumber, fileUri, mimeType }) => JSON.stringify({
     key: `${jobId}:page:${pageNumber}`,
     request: {
@@ -20,7 +23,12 @@ export function buildBatchJsonl(
         { text: translationPrompt(sourceLanguage, targetLanguage) },
         { file_data: { mime_type: mimeType, file_uri: fileUri } },
       ] }],
-      generation_config: { responseModalities: ["IMAGE"] },
+      generation_config: {
+        responseModalities: ["IMAGE"],
+        imageConfig: {
+          imageSize,
+        },
+      },
     },
   })).join("\n")
   return new Blob([`${text}\n`], { type: "application/jsonl" })

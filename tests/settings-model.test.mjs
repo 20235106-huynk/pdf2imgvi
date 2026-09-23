@@ -75,3 +75,35 @@ test("legacy Gemini model selection survives settings migration", () => {
   )
   assert.equal(normalizeSettings({ geminiModel: "unknown" }).geminiModel, DEFAULT_SETTINGS.geminiModel)
 })
+
+test("QUALITY_TO_IMAGE_SIZE maps standard to 1K, high to 2K, very-high to 4K", () => {
+  assert.equal(settings.QUALITY_TO_IMAGE_SIZE.standard, "1K")
+  assert.equal(settings.QUALITY_TO_IMAGE_SIZE.high, "2K")
+  assert.equal(settings.QUALITY_TO_IMAGE_SIZE["very-high"], "4K")
+})
+
+test("normalizes quality based on geminiModel capability", () => {
+  // Models supporting 1K only: fallback to standard
+  assert.equal(
+    normalizeSettings({ geminiModel: "gemini-3.1-flash-lite-image", quality: "very-high" }).quality,
+    "standard",
+  )
+  assert.equal(
+    normalizeSettings({ geminiModel: "gemini-2.5-flash-image", quality: "high" }).quality,
+    "standard",
+  )
+
+  // Models supporting 1K / 2K / 4K: keep quality
+  assert.equal(
+    normalizeSettings({ geminiModel: "gemini-3.1-flash-image", quality: "very-high" }).quality,
+    "very-high",
+  )
+  assert.equal(
+    normalizeSettings({ geminiModel: "gemini-3.1-flash-image", quality: "high" }).quality,
+    "high",
+  )
+  assert.equal(
+    normalizeSettings({ geminiModel: "gemini-3-pro-image", quality: "very-high" }).quality,
+    "very-high",
+  )
+})
