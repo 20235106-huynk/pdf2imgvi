@@ -1,13 +1,23 @@
-import { useEffect, useRef, useState } from "react"
-import type { PDFDocumentProxy } from "pdfjs-dist"
+import { useEffect, useRef, useState, type ChangeEvent } from "react"
+import { getDocument, type PDFDocumentProxy } from "pdfjs-dist"
 
 import { Button } from "@/components/ui/button"
 import { createGeminiBatchClient } from "@/services/gemini-batch"
+import {
+  exportTranslatedPdf,
+  downloadPdfBlob,
+  type ExportProgress,
+} from "@/services/pdf-export.service"
 import { renderPdfPage } from "@/services/pdf-renderer"
 import { abortableDelay, startTranslation } from "@/services/translation-job"
+import { resumeJob, retryFailedPages } from "@/services/translation-recovery.service"
 import { getApiKey } from "@/storage/api-key.storage"
 import { registerBatch, unregisterBatch } from "@/storage/active-batches.storage"
-import { listCompletedPages, removeResults, saveCompletedPage, type CompletedPage } from "@/storage/results.storage"
+import {
+  createBatchRecord, createJob, deleteJob, getJob, getPageImage, getPagesByJob, listJobs,
+  saveCompletedPage, saveJobSnapshot, updateBatch,
+  type PageMetadata, type StoredJob,
+} from "@/storage/results.storage"
 import { getSettings } from "@/storage/settings.storage"
 import type { TranslationJob } from "@/types/translation"
 import { translationProgressLabel, translationStartError } from "./translation-start"
@@ -15,13 +25,17 @@ import { translationProgressLabel, translationStartError } from "./translation-s
 interface Props {
   pdf: PDFDocumentProxy | null
   fileName: string
+  fileSize: number
   selectedPages: number[] | null
   onRunningChange: (running: boolean) => void
+  onNavigateSettings?: () => void
+  loadPdf?: (file: File) => Promise<PDFDocumentProxy>
 }
 
 const TERMINAL_BATCH = new Set(["completed", "failed", "cancelled"])
+const FINISHED_JOB = new Set(["completed", "completed_with_errors", "failed"])
 
-export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange }: Props) {
+export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRunningChange, onNavigateSettings, loadPdf }: Props) {
   const [job, setJob] = useState<TranslationJob | null>(null)
   const jobRef = useRef<TranslationJob | null>(null)
   const runRef = useRef<ReturnType<typeof startTranslation> | null>(null)
@@ -30,38 +44,100 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
   const [cancelling, setCancelling] = useState(false)
   const [cancelRequested, setCancelRequested] = useState(false)
   const [error, setError] = useState("")
-  const [saved, setSaved] = useState<CompletedPage[]>([])
-  const [selectedResult, setSelectedResult] = useState("")
+  const [savedJobs, setSavedJobs] = useState<StoredJob[]>([])
+  const [viewed, setViewed] = useState<{ job: StoredJob; pages: PageMetadata[] } | null>(null)
+  const [selectedPage, setSelectedPage] = useState<number | null>(null)
   const [resultUrl, setResultUrl] = useState("")
 
-  async function refreshSaved() {
-    const rows = await listCompletedPages()
-    rows.sort((a, b) => a.fileName.localeCompare(b.fileName) || a.pageNumber - b.pageNumber)
-    setSaved(rows)
-    setSelectedResult((current) => rows.some((row) => `${row.jobId}:${row.pageNumber}` === current)
-      ? current
-      : rows.length ? `${rows[0].jobId}:${rows[0].pageNumber}` : "")
+  const [exportingJobId, setExportingJobId] = useState<string | null>(null)
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null)
+  const [partialConfirm, setPartialConfirm] = useState<{
+    jobId: string
+    completedCount: number
+    failedCount: number
+  } | null>(null)
+
+  const [resumingJobId, setResumingJobId] = useState<string | null>(null)
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null)
+  const [recoveryStatus, setRecoveryStatus] = useState("")
+  const [missingApiKeyPrompt, setMissingApiKeyPrompt] = useState(false)
+  const [pdfPromptJob, setPdfPromptJob] = useState<StoredJob | null>(null)
+  const [pdfFileError, setPdfFileError] = useState("")
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  async function refreshJobs() {
+    setSavedJobs(await listJobs())
+  }
+
+  async function openSaved(saved: StoredJob) {
+    try {
+      const pages = await getPagesByJob(saved.id)
+      setViewed({ job: saved, pages })
+      setSelectedPage(pages.find((page) => page.status === "completed")?.pageNumber ?? null)
+      setError("")
+    } catch {
+      setError("Could not load saved translation. Please reload the workspace.")
+    }
   }
 
   useEffect(() => {
-    void refreshSaved().catch(() => setError("Could not load saved results."))
-    const refresh = () => { void refreshSaved().catch(() => setError("Could not load saved results.")) }
+    void refreshJobs().catch(() => setError("Could not load saved translations."))
+    const refresh = () => {
+      setViewed(null)
+      setSelectedPage(null)
+      void refreshJobs().catch(() => setError("Could not load saved translations."))
+    }
     window.addEventListener("pdf2imgvi-results-changed", refresh)
     return () => window.removeEventListener("pdf2imgvi-results-changed", refresh)
   }, [])
 
   useEffect(() => {
-    const row = saved.find((item) => `${item.jobId}:${item.pageNumber}` === selectedResult)
-    if (!row) { setResultUrl(""); return }
-    const url = URL.createObjectURL(row.image)
-    setResultUrl(url)
-    return () => URL.revokeObjectURL(url)
-  }, [saved, selectedResult])
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setResultUrl("")
+    if (!viewed || selectedPage === null) return
+    let active = true
+    let url = ""
+    void getPageImage(viewed.job.id, selectedPage).then((image) => {
+      if (!active) return
+      if (!image) { setResultUrl(""); return }
+      url = URL.createObjectURL(image)
+      setResultUrl(url)
+    }).catch(() => { if (active) setError("Could not load translated image.") })
+    return () => {
+      active = false
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [viewed, selectedPage])
+
+  async function getWorkspaceTabId(): Promise<number> {
+    const response = await chrome.runtime.sendMessage({ type: "REGISTER_WORKSPACE" })
+    if (typeof response?.tabId === "number") return response.tabId
+    throw new Error("Could not identify workspace tab")
+  }
+
+  async function defaultLoadPdf(file: File): Promise<PDFDocumentProxy> {
+    const url = URL.createObjectURL(file)
+    try {
+      const task = getDocument({ url, wasmUrl: new URL("wasm/", window.location.href).href })
+      return await task.promise
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
 
   async function start() {
     if (starting || running) return
     setStarting(true)
     setError("")
+    setMissingApiKeyPrompt(false)
     setCancelRequested(false)
     try {
       const [settings, apiKey] = await Promise.all([getSettings(), getApiKey()])
@@ -69,41 +145,44 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
       if (validation) { setError(validation); return }
       if (!pdf || !selectedPages || !apiKey) return
 
-      const response: unknown = await chrome.runtime.sendMessage({ type: "REGISTER_WORKSPACE" })
-      const tabId = typeof response === "object" && response !== null && "tabId" in response
-        ? response.tabId : null
-      if (typeof tabId !== "number" || !Number.isSafeInteger(tabId)) {
-        throw new Error("Could not identify workspace tab")
-      }
+      const tabId = await getWorkspaceTabId()
 
       const client = createGeminiBatchClient(apiKey)
       const run = startTranslation({
-        pdf, fileName, pages: [...selectedPages], settings, apiKey, tabId,
+        pdf, fileName, fileSize, pages: [...selectedPages], settings, apiKey, tabId,
         onChange: (next) => {
           const previousCompleted = jobRef.current?.completedPages ?? 0
           jobRef.current = next
           setJob(next)
           if (next.completedPages > previousCompleted) {
-            void refreshSaved().catch(() => setError("Could not load saved results."))
+            void refreshJobs().catch(() => setError("Could not load saved translations."))
           }
         },
       }, {
         renderPage: renderPdfPage,
         client,
+        createJob,
+        saveJobSnapshot,
         saveCompletedPage,
         registerBatch,
         unregisterBatch,
+        createBatchRecord,
+        updateBatch,
         sleep: abortableDelay,
       })
       runRef.current = run
       setRunning(true)
       onRunningChange(true)
       void run.finished.then(async () => {
-        await refreshSaved()
+        await refreshJobs()
         const active = jobRef.current?.status === "running"
         setRunning(active)
         onRunningChange(active)
-      }).catch(() => setError("Translation stopped unexpectedly."))
+      }).catch(() => {
+        setError("Could not save translation progress locally. Please free browser storage and try again.")
+        setRunning(false)
+        onRunningChange(false)
+      })
     } catch {
       setError("Could not start translation. Check Settings and try again.")
       setRunning(false)
@@ -120,7 +199,7 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
     setError("")
     try {
       await runRef.current.cancel()
-      await refreshSaved()
+      await refreshJobs()
       const unconfirmed = jobRef.current?.batches.filter((batch) => !TERMINAL_BATCH.has(batch.state)) ?? []
       if (unconfirmed.length) {
         setError(`Cancellation is not confirmed for ${unconfirmed.length} batch(es). They may still be processing.`)
@@ -137,20 +216,282 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
     }
   }
 
-  async function removeSaved(jobId: string) {
+  function stopPolling() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    setResumingJobId(null)
+    setRetryingJobId(null)
+    setRunning(false)
+    onRunningChange(false)
+    setRecoveryStatus("")
+  }
+
+  async function handleResume(jobId: string) {
+    if (starting || running || resumingJobId || retryingJobId) return
+    setError("")
+    setMissingApiKeyPrompt(false)
+
     try {
-      await removeResults(jobId)
-      await refreshSaved()
-    } catch {
-      setError("Could not remove saved results.")
+      const [settings, apiKey] = await Promise.all([getSettings(), getApiKey()])
+      if (!apiKey?.trim()) {
+        setMissingApiKeyPrompt(true)
+        setError("Gemini API key is required to resume this translation.")
+        return
+      }
+
+      setResumingJobId(jobId)
+      setRunning(true)
+      onRunningChange(true)
+      setRecoveryStatus("Checking Gemini…")
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      const client = createGeminiBatchClient(apiKey)
+      await resumeJob({
+        jobId,
+        client,
+        pollingIntervalMs: settings.pollingIntervalMs,
+        signal: controller.signal,
+        onProgress: (updatedJob) => {
+          setRecoveryStatus(`Gemini is processing translation… (${updatedJob.completedPages}/${updatedJob.selectedPages.length})`)
+          void refreshJobs()
+          if (viewed?.job.id === jobId) {
+            void openSaved(updatedJob)
+          }
+        },
+      })
+    } catch (err: unknown) {
+      if (abortControllerRef.current?.signal.aborted) {
+        // Aborted locally
+      } else {
+        const msg = err instanceof Error ? err.message : "Could not resume translation."
+        setError(msg)
+      }
+    } finally {
+      abortControllerRef.current = null
+      setResumingJobId(null)
+      setRunning(false)
+      onRunningChange(false)
+      setRecoveryStatus("")
+      await refreshJobs()
+      const finalJob = await getJob(jobId)
+      if (finalJob && viewed?.job.id === jobId) {
+        void openSaved(finalJob)
+      }
     }
   }
 
-  const savedJobs = [...new Map(saved.map((row) => [row.jobId, row.fileName])).entries()]
-  const selected = saved.find((row) => `${row.jobId}:${row.pageNumber}` === selectedResult)
+  async function handleRetry(jobToRetry: StoredJob) {
+    if (starting || running || resumingJobId || retryingJobId) return
+    setError("")
+    setPdfFileError("")
+    setMissingApiKeyPrompt(false)
+
+    const isMatching = pdf !== null && fileName === jobToRetry.fileName && pdf.numPages === jobToRetry.totalPages
+    if (isMatching && pdf) {
+      await executeRetry(jobToRetry, pdf)
+    } else {
+      setPdfPromptJob(jobToRetry)
+    }
+  }
+
+  async function onPdfFileSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !pdfPromptJob) return
+    setPdfFileError("")
+
+    if (file.name !== pdfPromptJob.fileName) {
+      setPdfFileError(`Selected file "${file.name}" does not match original file "${pdfPromptJob.fileName}".`)
+      return
+    }
+
+    try {
+      const loader = loadPdf ?? defaultLoadPdf
+      const loadedPdf = await loader(file)
+      if (loadedPdf.numPages !== pdfPromptJob.totalPages) {
+        setPdfFileError(`PDF has ${loadedPdf.numPages} pages, but original translation had ${pdfPromptJob.totalPages} pages.`)
+        return
+      }
+      const target = pdfPromptJob
+      setPdfPromptJob(null)
+      await executeRetry(target, loadedPdf)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not load selected PDF."
+      setPdfFileError(msg)
+    }
+  }
+
+  async function executeRetry(jobToRetry: StoredJob, pdfProxy: PDFDocumentProxy) {
+    if (starting || running || resumingJobId || retryingJobId) return
+    setError("")
+    setMissingApiKeyPrompt(false)
+
+    try {
+      const [settings, apiKey] = await Promise.all([getSettings(), getApiKey()])
+      if (!apiKey?.trim()) {
+        setMissingApiKeyPrompt(true)
+        setError("Gemini API key is required to retry failed pages.")
+        return
+      }
+
+      setRetryingJobId(jobToRetry.id)
+      setRunning(true)
+      onRunningChange(true)
+      setRecoveryStatus("Preparing retry for failed pages…")
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      await retryFailedPages({
+        jobId: jobToRetry.id,
+        pdf: pdfProxy,
+        fileName: jobToRetry.fileName,
+        apiKey,
+        settings,
+        signal: controller.signal,
+        onProgress: (updatedJob) => {
+          setRecoveryStatus(`Retrying failed pages… (${updatedJob.completedPages}/${updatedJob.selectedPages.length})`)
+          void refreshJobs()
+          if (viewed?.job.id === jobToRetry.id) {
+            void openSaved(updatedJob)
+          }
+        },
+      })
+    } catch (err: unknown) {
+      if (abortControllerRef.current?.signal.aborted) {
+        // Aborted locally
+      } else {
+        const msg = err instanceof Error ? err.message : "Could not retry failed pages."
+        setError(msg)
+      }
+    } finally {
+      abortControllerRef.current = null
+      setRetryingJobId(null)
+      setRunning(false)
+      onRunningChange(false)
+      setRecoveryStatus("")
+      await refreshJobs()
+      const finalJob = await getJob(jobToRetry.id)
+      if (finalJob && viewed?.job.id === jobToRetry.id) {
+        void openSaved(finalJob)
+      }
+    }
+  }
+
+  async function removeSaved(jobId: string) {
+    if (exportingJobId) return
+    try {
+      await deleteJob(jobId)
+      if (viewed?.job.id === jobId) { setViewed(null); setSelectedPage(null) }
+      await refreshJobs()
+    } catch {
+      setError("Could not delete saved translation.")
+    }
+  }
+
+  async function handleExport(
+    jobId: string,
+    completedCount: number,
+    failedCount: number,
+    skipConfirm = false,
+  ) {
+    if (exportingJobId) return
+    if (!skipConfirm && failedCount > 0) {
+      setPartialConfirm({ jobId, completedCount, failedCount })
+      return
+    }
+    setPartialConfirm(null)
+    setExportingJobId(jobId)
+    setExportProgress(null)
+    setError("")
+    try {
+      const result = await exportTranslatedPdf({
+        jobId,
+        onProgress: (p) => setExportProgress(p),
+      })
+      await downloadPdfBlob(result.blob, result.filename)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not export PDF."
+      setError(msg)
+    } finally {
+      setExportingJobId(null)
+      setExportProgress(null)
+    }
+  }
+
   const completedBatches = job?.batches.filter((batch) => batch.state === "completed").length ?? 0
   const failedBatches = job?.batches.filter((batch) => batch.state === "failed").length ?? 0
   const activeBatches = job?.batches.filter((batch) => !TERMINAL_BATCH.has(batch.state)).length ?? 0
+
+  function renderJobActions(
+    targetJob: StoredJob | { id: string; completedPages: number; failedPages: number; cancelledPages: number; status: string },
+    options: { showView?: boolean; showDelete?: boolean } = {}
+  ) {
+    const isExporting = exportingJobId === targetJob.id
+    const isResuming = resumingJobId === targetJob.id
+    const isRetrying = retryingJobId === targetJob.id
+    const isFinished = FINISHED_JOB.has(targetJob.status)
+    const exportDisabled = exportingJobId !== null || (running && job?.id === targetJob.id)
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {targetJob.completedPages > 0 && (!running || targetJob.id !== job?.id) && (
+          <Button
+            type="button"
+            disabled={exportDisabled}
+            onClick={() => void handleExport(targetJob.id, targetJob.completedPages, targetJob.failedPages + targetJob.cancelledPages)}
+          >
+            {isExporting
+              ? `Preparing PDF… ${exportProgress ? `${exportProgress.processedPages}/${exportProgress.totalPages}` : ""}`
+              : "Download PDF"}
+          </Button>
+        )}
+        {!isFinished && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={running || exportingJobId !== null}
+            onClick={() => void handleResume(targetJob.id)}
+          >
+            {isResuming ? "Resuming…" : "Resume"}
+          </Button>
+        )}
+        {targetJob.failedPages > 0 && !running && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={running || exportingJobId !== null}
+            onClick={async () => {
+              const stored = "fileName" in targetJob ? (targetJob as StoredJob) : await getJob(targetJob.id)
+              if (stored) void handleRetry(stored)
+            }}
+          >
+            {isRetrying ? "Retrying…" : "Retry Failed Pages"}
+          </Button>
+        )}
+        {options.showView && "fileName" in targetJob && (
+          <Button type="button" variant="outline" onClick={() => void openSaved(targetJob as StoredJob)}>
+            View
+          </Button>
+        )}
+        {options.showDelete && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={exportingJobId !== null || (running && (job?.id === targetJob.id || isResuming || isRetrying))}
+            onClick={() => void removeSaved(targetJob.id)}
+          >
+            Delete
+          </Button>
+        )}
+      </div>
+    )
+  }
+
+  const inProgressJob = savedJobs.find((j) => j.status === "submitted" || j.status === "processing")
 
   return (
     <section className="mt-6 w-full max-w-4xl space-y-4 text-left" aria-label="Translation">
@@ -159,13 +500,131 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
           onClick={() => void start()}>
           {starting ? "Starting…" : "Start Translation"}
         </Button>
-        {running && <Button type="button" variant="outline" disabled={cancelling || cancelRequested}
-          onClick={() => void cancel()}>
-          {cancelling ? "Cancelling…" : "Cancel Translation"}
-        </Button>}
+        {running && runRef.current && (
+          <Button type="button" variant="outline" disabled={cancelling || cancelRequested}
+            onClick={() => void cancel()}>
+            {cancelling ? "Cancelling…" : "Cancel Translation"}
+          </Button>
+        )}
+        {running && (resumingJobId || retryingJobId) && (
+          <Button type="button" variant="outline" onClick={stopPolling}>
+            Stop Polling
+          </Button>
+        )}
       </div>
       <p className="text-center text-sm text-muted-foreground">Selected pages are uploaded directly to Gemini for translation.</p>
       {error && <p role="alert" className="text-center text-sm text-destructive">{error}</p>}
+      {missingApiKeyPrompt && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-2 text-foreground" role="alert">
+          <p className="font-semibold text-amber-700 dark:text-amber-400">Gemini API key required</p>
+          <p>Gemini API key is required to resume or retry this translation.</p>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              onNavigateSettings?.()
+              window.dispatchEvent(new CustomEvent("pdf2imgvi-navigate-settings"))
+            }}
+          >
+            Open Settings
+          </Button>
+        </div>
+      )}
+      {pdfPromptJob && (
+        <div className="rounded-md border border-blue-500/50 bg-blue-500/10 p-4 text-sm space-y-2 text-foreground" role="region" aria-label="PDF selection for retry">
+          <p className="font-semibold text-blue-700 dark:text-blue-400">Select Original PDF</p>
+          <p>Please select the original PDF ({pdfPromptJob.fileName}, {pdfPromptJob.totalPages} pages) to retry failed pages.</p>
+          <input
+            type="file"
+            accept="application/pdf"
+            className="block text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-sm file:font-semibold file:text-primary-foreground hover:file:opacity-90"
+            onChange={(e) => void onPdfFileSelected(e)}
+          />
+          {pdfFileError && <p role="alert" className="text-sm text-destructive">{pdfFileError}</p>}
+          <Button type="button" size="sm" variant="outline" onClick={() => { setPdfPromptJob(null); setPdfFileError("") }}>
+            Cancel
+          </Button>
+        </div>
+      )}
+      {recoveryStatus && (
+        <div className="rounded-md border p-3 text-sm space-y-1.5" aria-live="polite">
+          <div className="flex justify-between font-medium">
+            <span>{recoveryStatus}</span>
+          </div>
+        </div>
+      )}
+      {exportingJobId && exportProgress && (
+        <div className="rounded-md border p-3 text-sm space-y-1.5" aria-live="polite">
+          <div className="flex justify-between font-medium">
+            <span>Creating PDF…</span>
+            <span>{exportProgress.processedPages} / {exportProgress.totalPages} pages</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded bg-secondary">
+            <div
+              className="h-full bg-primary transition-all duration-200"
+              style={{ width: `${Math.round((exportProgress.processedPages / exportProgress.totalPages) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {partialConfirm && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-2 text-foreground" role="alert">
+          <p className="font-semibold text-amber-700 dark:text-amber-400">Some pages failed to translate</p>
+          <p>
+            {partialConfirm.completedCount} pages completed, {partialConfirm.failedCount} pages failed.
+            Export the {partialConfirm.completedCount} successful pages anyway?
+          </p>
+          <div className="flex gap-2 pt-1">
+            <Button
+              type="button"
+              size="sm"
+              disabled={exportingJobId !== null}
+              onClick={() => void handleExport(partialConfirm.jobId, partialConfirm.completedCount, partialConfirm.failedCount, true)}
+            >
+              Export {partialConfirm.completedCount} pages
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setPartialConfirm(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {inProgressJob && !job && (
+        <div className="rounded-md border p-4 space-y-2" aria-live="polite">
+          <h3 className="font-semibold">Translation in progress</h3>
+          <p className="font-medium">{inProgressJob.fileName}</p>
+          <p className="text-sm text-muted-foreground">
+            {inProgressJob.completedPages} / {inProgressJob.selectedPages.length} pages completed
+          </p>
+          {resumingJobId === inProgressJob.id ? (
+            <p className="text-sm font-medium text-primary">{recoveryStatus || "Checking Gemini…"}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Gemini is processing this document.</p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <Button
+              type="button"
+              disabled={running || exportingJobId !== null}
+              onClick={() => void handleResume(inProgressJob.id)}
+            >
+              {resumingJobId === inProgressJob.id ? "Resuming…" : "Resume"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={running && (resumingJobId === inProgressJob.id || retryingJobId === inProgressJob.id)}
+              onClick={() => void removeSaved(inProgressJob.id)}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
       {job && (
         <div className="rounded-md border p-4" aria-live="polite">
           <p className="font-medium">{translationProgressLabel(job)}</p>
@@ -173,29 +632,50 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
           <p className="text-sm text-muted-foreground">Batches: {completedBatches} completed · {activeBatches} pending/running · {failedBatches} failed</p>
           {job.pages.filter((page) => page.error).map((page) =>
             <p key={page.pageNumber} className="text-sm text-destructive">Page {page.pageNumber}: {page.error}</p>)}
+          <div className="mt-3">
+            {renderJobActions(job)}
+          </div>
         </div>
       )}
       {savedJobs.length > 0 && (
-        <section className="space-y-4 rounded-md border p-4" aria-label="Saved translated pages">
-          <h2 className="text-lg font-semibold">Saved translated pages</h2>
-          {savedJobs.map(([jobId, name]) => (
-            <div key={jobId} className="space-y-2 border-t pt-3">
+        <section className="space-y-4 rounded-md border p-4" aria-label="Saved translations">
+          <h2 className="text-lg font-semibold">Saved translations</h2>
+          {savedJobs.map((saved) => (
+            <div key={saved.id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+              <div>
+                <p className="break-all text-sm font-medium">{saved.fileName}</p>
+                <p className="text-sm text-muted-foreground">{saved.completedPages} / {saved.selectedPages.length} pages completed · {saved.failedPages} failed · {saved.cancelledPages} cancelled · {saved.status.replaceAll("_", " ")}</p>
+              </div>
+              {renderJobActions(saved, { showView: true, showDelete: true })}
+            </div>
+          ))}
+          {viewed && (
+            <div className="space-y-3 border-t pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="break-all text-sm font-medium">{name}</p>
-                <Button type="button" variant="outline" onClick={() => void removeSaved(jobId)}>Remove saved results</Button>
+                <div>
+                  <p className="font-medium">{viewed.job.fileName}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {viewed.job.failedPages > 0
+                      ? `${viewed.job.failedPages} page(s) failed. Retry Failed Pages will submit a new batch for failed pages.`
+                      : "Review translated pages or download completed PDF."}
+                  </p>
+                </div>
+                {renderJobActions(viewed.job)}
               </div>
               <div className="flex flex-wrap gap-2">
-                {saved.filter((row) => row.jobId === jobId).map((row) => (
-                  <Button key={row.pageNumber} type="button" variant={selectedResult === `${jobId}:${row.pageNumber}` ? "default" : "outline"}
-                    onClick={() => setSelectedResult(`${jobId}:${row.pageNumber}`)}>
-                    Page {row.pageNumber}
+                {viewed.pages.map((page) => (
+                  <Button key={page.pageNumber} type="button" variant={selectedPage === page.pageNumber ? "default" : "outline"}
+                    onClick={() => setSelectedPage(page.status === "completed" ? page.pageNumber : null)}>
+                    Page {page.pageNumber}: {page.status}
                   </Button>
                 ))}
               </div>
+              {viewed.pages.filter((page) => page.error).map((page) =>
+                <p key={page.pageNumber} className="text-sm text-destructive">Page {page.pageNumber}: {page.error}</p>)}
+              {selectedPage !== null && resultUrl && <img src={resultUrl} alt={`Translated page ${selectedPage} from ${viewed.job.fileName}`}
+                className="mx-auto max-w-full rounded border bg-white shadow-sm" />}
             </div>
-          ))}
-          {selected && resultUrl && <img src={resultUrl} alt={`Translated page ${selected.pageNumber} from ${selected.fileName}`}
-            className="mx-auto max-w-full rounded border bg-white shadow-sm" />}
+          )}
         </section>
       )}
     </section>

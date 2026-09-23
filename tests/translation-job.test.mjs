@@ -10,7 +10,10 @@ async function start(input, ports) {
 
 function input(pages, onChange, batchSize = 5) {
   return {
-    pdf: {}, fileName: "book.pdf", pages,
+    pdf: { numPages: Math.max(...pages, 1) },
+    fileName: "book.pdf",
+    fileSize: 1024,
+    pages,
     settings: { ...DEFAULT_SETTINGS, batchSize, pollingIntervalMs: 3000 },
     apiKey: "secret", tabId: 12, onChange,
   }
@@ -20,6 +23,8 @@ function fixturePorts(overrides = {}) {
   const events = []
   const saved = []
   const groups = []
+  const snapshots = []
+  const createdJobs = []
   let uploadNumber = 0
   let batchNumber = 0
   const ports = {
@@ -50,11 +55,13 @@ function fixturePorts(overrides = {}) {
       cancelBatch: async () => {},
     },
     saveCompletedPage: async (jobId, fileName, pageNumber, image) => saved.push({ jobId, fileName, pageNumber, image }),
+    createJob: async (job, file, settings) => { createdJobs.push({ job, file, settings }) },
+    saveJobSnapshot: async (job, changedPages) => { snapshots.push({ job, changedPages }) },
     registerBatch: async () => {},
     unregisterBatch: async () => {},
     sleep: async () => {},
   }
-  return { events, saved, groups, ports: { ...ports, ...overrides, client: { ...ports.client, ...overrides.client } } }
+  return { events, saved, groups, snapshots, createdJobs, ports: { ...ports, ...overrides, client: { ...ports.client, ...overrides.client } } }
 }
 
 test("renders/uploads one page at a time, submits chunks, and maps reversed results", async () => {
@@ -338,3 +345,17 @@ test("a stale poll cannot reopen a batch completed during cancellation", async (
   assert.equal(snapshots.at(-1).batches[0].state, "completed")
   assert.equal(snapshots.at(-1).status, "completed")
 })
+
+test("persists batch record immediately after submission", async () => {
+  const createdBatches = []
+  const { ports } = fixturePorts({
+    createBatchRecord: async (record) => { createdBatches.push(record) },
+  })
+  const run = await start(input([1], () => {}), ports)
+  await run.finished
+  assert.equal(createdBatches.length, 1)
+  assert.equal(createdBatches[0].batchName, "batches/b1")
+  assert.equal(createdBatches[0].status, "submitted")
+  assert.deepEqual(createdBatches[0].pageNumbers, [1])
+})
+

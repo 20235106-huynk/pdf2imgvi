@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { SettingsPage } from "@/settings/SettingsPage"
@@ -6,6 +6,7 @@ import { PdfPreview } from "./PdfPreview"
 
 export function App() {
   const [view, setView] = useState<"translator" | "settings">("translator")
+  const [translationRunning, setTranslationRunning] = useState(false)
 
   return (
     <div className="min-h-screen">
@@ -34,9 +35,12 @@ export function App() {
       </header>
 
       <div hidden={view !== "translator"}>
-        <PdfPreview />
+        <PdfPreview
+          onTranslationRunningChange={setTranslationRunning}
+          onNavigateSettings={() => setView("settings")}
+        />
       </div>
-      {view === "settings" && <SettingsPage />}
+      {view === "settings" && <SettingsPage translationRunning={translationRunning} />}
     </div>
   )
 }

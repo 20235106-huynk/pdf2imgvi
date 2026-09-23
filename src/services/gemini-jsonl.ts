@@ -20,7 +20,7 @@ export function buildBatchJsonl(
         { text: translationPrompt(sourceLanguage, targetLanguage) },
         { file_data: { mime_type: mimeType, file_uri: fileUri } },
       ] }],
-      generation_config: { responseModalities: ["TEXT", "IMAGE"] },
+      generation_config: { responseModalities: ["IMAGE"] },
     },
   })).join("\n")
   return new Blob([`${text}\n`], { type: "application/jsonl" })

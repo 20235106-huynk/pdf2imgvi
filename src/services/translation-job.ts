@@ -4,11 +4,13 @@ import { buildBatchJsonl, parseBatchResults, splitIntoBatches } from "./gemini-j
 import type { GeminiBatchClient, GeminiBatchStatus } from "./gemini-batch.ts"
 import type { RenderedPage } from "./pdf-renderer.ts"
 import type { AppSettings } from "../types/settings.ts"
+import type { TranslationBatchRecord } from "../storage/results.storage.ts"
 import type { BatchStatus, PageStatus, TranslationJob, TranslationPageJob } from "../types/translation.ts"
 
 export interface TranslationInput {
   pdf: PDFDocumentProxy
   fileName: string
+  fileSize: number
   pages: number[]
   settings: AppSettings
   apiKey: string
@@ -20,8 +22,12 @@ export interface TranslationPorts {
   renderPage: (pdf: PDFDocumentProxy, pageNumber: number, quality: AppSettings["quality"]) => Promise<RenderedPage>
   client: GeminiBatchClient
   saveCompletedPage: (jobId: string, fileName: string, pageNumber: number, image: Blob) => Promise<void>
+  createJob: (job: TranslationJob, file: { name: string; size: number; totalPages: number }, settings: AppSettings) => Promise<void>
+  saveJobSnapshot: (job: TranslationJob, changedPages: readonly number[]) => Promise<void>
   registerBatch: (tabId: number, batchName: string) => Promise<void>
   unregisterBatch: (tabId: number, batchName: string) => Promise<void>
+  createBatchRecord?: (batch: TranslationBatchRecord) => Promise<void>
+  updateBatch?: (batchId: string, patch: Partial<TranslationBatchRecord>) => Promise<void>
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
@@ -58,8 +64,10 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
   let stopping = false
   let cancellation: Promise<void> | null = null
   const finalized = new Set<string>()
+  let persistence = Promise.resolve()
+  let persistenceError: unknown = null
 
-  function emit(): void {
+  function emit(changedPages: readonly number[] = []): void {
     job.completedPages = job.pages.filter((page) => page.status === "completed").length
     job.failedPages = job.pages.filter((page) => page.status === "failed").length
     job.cancelledPages = job.pages.filter((page) => page.status === "cancelled").length
@@ -67,10 +75,14 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
       job.status = job.failedPages ? "failed" : job.cancelledPages ? "cancelled" : "completed"
       job.stage = "finished"
     }
-    input.onChange({
+    const snapshot: TranslationJob = {
       ...job,
       pages: job.pages.map((page) => ({ ...page })),
       batches: job.batches.map((batch) => ({ ...batch, pageNumbers: [...batch.pageNumbers] })),
+    }
+    input.onChange(snapshot)
+    persistence = persistence.then(() => ports.saveJobSnapshot(snapshot, changedPages)).catch((error: unknown) => {
+      persistenceError ??= error
     })
   }
 
@@ -85,7 +97,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     if (item.status === "completed") return
     item.status = status
     item.error = error
-    emit()
+    emit(status === "completed" ? [] : [pageNumber])
   }
 
   function batchState(name: string, state: BatchStatus): void {
@@ -109,10 +121,12 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         for (const result of results) {
           if (result.image) {
             try {
+              await persistence
+              if (persistenceError) throw persistenceError
               await ports.saveCompletedPage(job.id, input.fileName, result.pageNumber, result.image)
               mark(result.pageNumber, "completed")
             } catch {
-              mark(result.pageNumber, "failed", "Could not save translated image")
+              mark(result.pageNumber, "failed", "Could not save translated page locally. Free browser storage and try again.")
             }
           } else {
             mark(result.pageNumber, "failed", result.error ?? "Gemini returned no image")
@@ -126,13 +140,19 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     } else {
       for (const pageNumber of batch.pageNumbers) mark(pageNumber, "failed", "Gemini batch failed")
     }
+    if (ports.updateBatch) {
+      const localStatus = status.state === "completed" ? "succeeded" : status.state === "cancelled" ? "cancelled" : "failed"
+      await ports.updateBatch(status.name, { status: localStatus }).catch(() => {})
+    }
     await ports.unregisterBatch(input.tabId, status.name).catch(() => {})
   }
 
-  emit()
-
   const submission = (async () => {
+    await ports.createJob(job, { name: input.fileName, size: input.fileSize, totalPages: input.pdf.numPages }, input.settings)
+    emit()
     for (const pageNumbers of splitIntoBatches(input.pages, input.settings.batchSize)) {
+      await persistence
+      if (persistenceError) throw persistenceError
       if (stopping) break
       const uploads: { pageNumber: number; fileUri: string; mimeType: string }[] = []
       for (const pageNumber of pageNumbers) {
@@ -158,10 +178,23 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         const jsonl = buildBatchJsonl(job.id, uploads, input.settings.sourceLanguage, input.settings.targetLanguage)
         const file = await ports.client.uploadFile(jsonl, `batch-${job.batches.length + 1}.jsonl`, aborter.signal)
         const name = await ports.client.submitBatch(input.settings.geminiModel, file.name, aborter.signal)
+        if (ports.createBatchRecord) {
+          const now = Date.now()
+          await ports.createBatchRecord({
+            id: crypto.randomUUID(),
+            jobId: job.id,
+            batchName: name,
+            model: input.settings.geminiModel,
+            pageNumbers: uploads.map((upload) => upload.pageNumber),
+            status: "submitted",
+            createdAt: now,
+            updatedAt: now,
+          })
+        }
         job.batches.push({ id: name, pageNumbers: uploads.map((upload) => upload.pageNumber), state: "pending" })
         for (const upload of uploads) page(upload.pageNumber).batchId = name
         job.stage = "submitted"
-        emit()
+        emit(uploads.map((upload) => upload.pageNumber))
         await ports.registerBatch(input.tabId, name).catch(() => {})
       } catch {
         for (const upload of uploads) mark(upload.pageNumber, stopping ? "cancelled" : "failed", stopping ? undefined : "Could not submit Gemini batch")
@@ -211,6 +244,9 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         mark(item.pageNumber, stopping ? "cancelled" : "failed", "Translation stopped unexpectedly")
       }
     }
+  }).then(async () => {
+    await persistence
+    if (persistenceError) throw persistenceError
   })
 
   function cancel(): Promise<void> {

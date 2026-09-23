@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { getApiKey, saveApiKey } from "@/storage/api-key.storage"
 import { getSettings, saveSettings } from "@/storage/settings.storage"
-import { listCompletedPages, removeResults } from "@/storage/results.storage"
+import { clearTranslationCache } from "@/storage/results.storage"
 import {
   DEFAULT_SETTINGS,
   MAX_BATCH_SIZE,
@@ -21,7 +21,7 @@ import {
 const controlClass =
   "mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 
-export function SettingsPage() {
+export function SettingsPage({ translationRunning }: { translationRunning: boolean }) {
   const [draft, setDraft] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [apiKey, setApiKey] = useState("")
   const [showApiKey, setShowApiKey] = useState(false)
@@ -234,15 +234,15 @@ export function SettingsPage() {
         <section className="space-y-3 border-b pb-8" aria-labelledby="storage-heading">
           <h2 id="storage-heading" className="text-lg font-semibold">Local Storage</h2>
           <p className="text-sm text-muted-foreground">
-            Completed page images are stored locally on this device. Active jobs are not resumed after closing the workspace.
+            Translation jobs and completed page images are stored locally. Opening a saved job does not restart Gemini processing.
           </p>
           <Button
             type="button"
             variant="outline"
+            disabled={translationRunning}
             onClick={() => void (async () => {
               try {
-                const rows = await listCompletedPages()
-                await Promise.all([...new Set(rows.map((row) => row.jobId))].map(removeResults))
+                await clearTranslationCache()
                 window.dispatchEvent(new Event("pdf2imgvi-results-changed"))
                 setFeedback("Translation cache cleared.")
               } catch {
@@ -252,6 +252,7 @@ export function SettingsPage() {
           >
             Clear Translation Cache
           </Button>
+          {translationRunning && <p className="text-sm text-muted-foreground">Finish or cancel the active translation before clearing the cache.</p>}
         </section>
 
         <section className="space-y-2 border-b pb-8 text-sm" aria-labelledby="privacy-heading">

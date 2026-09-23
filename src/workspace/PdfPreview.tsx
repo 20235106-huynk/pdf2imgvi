@@ -18,7 +18,12 @@ import { TranslationPanel } from "./TranslationPanel"
 
 GlobalWorkerOptions.workerSrc = workerUrl
 
-export function PdfPreview() {
+interface PdfPreviewProps {
+  onTranslationRunningChange: (running: boolean) => void
+  onNavigateSettings?: () => void
+}
+
+export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: PdfPreviewProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const chooseButtonRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -29,6 +34,7 @@ export function PdfPreview() {
   const generationRef = useRef(0)
   const testRequestRef = useRef(0)
   const [fileName, setFileName] = useState("")
+  const [fileSize, setFileSize] = useState(0)
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSelection, setPageSelection] = useState("")
@@ -72,6 +78,7 @@ export function PdfPreview() {
     if (inputRef.current) inputRef.current.value = ""
     setPdf(null)
     setFileName("")
+    setFileSize(0)
     setPageNumber(1)
     setPageSelection("")
     setLoading(false)
@@ -90,6 +97,7 @@ export function PdfPreview() {
     setPageNumber(1)
     setPageSelection("")
     setFileName(file.name)
+    setFileSize(file.size)
     setError("")
     setLoading(true)
     setRendering(false)
@@ -279,8 +287,9 @@ export function PdfPreview() {
           )}
         </>
       )}
-      <TranslationPanel pdf={pdf} fileName={fileName} selectedPages={selectedPages}
-        onRunningChange={setTranslationRunning} />
+      <TranslationPanel pdf={pdf} fileName={fileName} fileSize={fileSize} selectedPages={selectedPages}
+        onRunningChange={(running) => { setTranslationRunning(running); onTranslationRunningChange(running) }}
+        onNavigateSettings={onNavigateSettings} />
     </main>
   )
 }
