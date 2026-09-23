@@ -1,0 +1,223 @@
+import type { PDFDocumentProxy } from "pdfjs-dist"
+
+import { buildBatchJsonl, parseBatchResults, splitIntoBatches } from "./gemini-jsonl.ts"
+import type { GeminiBatchClient, GeminiBatchStatus } from "./gemini-batch.ts"
+import type { RenderedPage } from "./pdf-renderer.ts"
+import type { AppSettings } from "../types/settings.ts"
+import type { PageStatus, TranslationJob, TranslationPageJob } from "../types/translation.ts"
+
+export interface TranslationInput {
+  pdf: PDFDocumentProxy
+  fileName: string
+  pages: number[]
+  settings: AppSettings
+  apiKey: string
+  tabId: number
+  onChange: (job: TranslationJob) => void
+}
+
+export interface TranslationPorts {
+  renderPage: (pdf: PDFDocumentProxy, pageNumber: number, quality: AppSettings["quality"]) => Promise<RenderedPage>
+  client: GeminiBatchClient
+  saveCompletedPage: (jobId: string, fileName: string, pageNumber: number, image: Blob) => Promise<void>
+  registerBatch: (tabId: number, batchName: string) => Promise<void>
+  unregisterBatch: (tabId: number, batchName: string) => Promise<void>
+  sleep: (ms: number) => Promise<void>
+}
+
+const TERMINAL = new Set(["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"])
+
+export function startTranslation(input: TranslationInput, ports: TranslationPorts): {
+  finished: Promise<void>
+  cancel: () => Promise<void>
+} {
+  if (!input.apiKey.trim()) throw new Error("Gemini API key is required")
+  if (!input.pages.length) throw new Error("Select at least one page")
+
+  const job: TranslationJob = {
+    id: crypto.randomUUID(),
+    pages: input.pages.map((pageNumber) => ({ pageNumber, status: "pending" })),
+    batches: [],
+    completedPages: 0,
+    failedPages: 0,
+    cancelledPages: 0,
+    status: "running",
+  }
+  const aborter = new AbortController()
+  let stopping = false
+  let cancellation: Promise<void> | null = null
+
+  function emit(): void {
+    job.completedPages = job.pages.filter((page) => page.status === "completed").length
+    job.failedPages = job.pages.filter((page) => page.status === "failed").length
+    job.cancelledPages = job.pages.filter((page) => page.status === "cancelled").length
+    if (job.pages.every((page) => ["completed", "failed", "cancelled"].includes(page.status))) {
+      job.status = job.failedPages ? "failed" : job.cancelledPages ? "cancelled" : "completed"
+    }
+    input.onChange({
+      ...job,
+      pages: job.pages.map((page) => ({ ...page })),
+      batches: job.batches.map((batch) => ({ ...batch, pageNumbers: [...batch.pageNumbers] })),
+    })
+  }
+
+  function page(pageNumber: number): TranslationPageJob {
+    const found = job.pages.find((item) => item.pageNumber === pageNumber)
+    if (!found) throw new Error("Page not in translation job")
+    return found
+  }
+
+  function mark(pageNumber: number, status: PageStatus, error?: string): void {
+    const item = page(pageNumber)
+    if (item.status === "completed") return
+    item.status = status
+    item.error = error
+    emit()
+  }
+
+  function batchState(name: string, state: string): void {
+    const batch = job.batches.find((item) => item.id === name)
+    if (batch) {
+      batch.state = state
+      emit()
+    }
+  }
+
+  async function finishBatch(status: GeminiBatchStatus): Promise<void> {
+    const batch = job.batches.find((item) => item.id === status.name)
+    if (!batch) return
+    batchState(status.name, status.state)
+    if (status.state === "JOB_STATE_SUCCEEDED") {
+      try {
+        if (!status.responseFile) throw new Error("Missing Gemini results file")
+        const jsonl = await ports.client.downloadResults(status.responseFile)
+        const results = await parseBatchResults(jsonl, job.id, batch.pageNumbers)
+        for (const result of results) {
+          if (result.image) {
+            try {
+              await ports.saveCompletedPage(job.id, input.fileName, result.pageNumber, result.image)
+              mark(result.pageNumber, "completed")
+            } catch {
+              mark(result.pageNumber, "failed", "Could not save translated image")
+            }
+          } else {
+            mark(result.pageNumber, "failed", result.error ?? "Gemini returned no image")
+          }
+        }
+      } catch {
+        for (const pageNumber of batch.pageNumbers) mark(pageNumber, "failed", "Could not read Gemini batch results")
+      }
+    } else if (status.state === "JOB_STATE_CANCELLED") {
+      for (const pageNumber of batch.pageNumbers) mark(pageNumber, "cancelled")
+    } else {
+      for (const pageNumber of batch.pageNumbers) mark(pageNumber, "failed", "Gemini batch failed")
+    }
+    await ports.unregisterBatch(input.tabId, status.name).catch(() => {})
+  }
+
+  emit()
+
+  const submission = (async () => {
+    for (const pageNumbers of splitIntoBatches(input.pages, input.settings.batchSize)) {
+      if (stopping) break
+      const uploads: { pageNumber: number; fileUri: string; mimeType: string }[] = []
+      for (const pageNumber of pageNumbers) {
+        if (stopping) break
+        mark(pageNumber, "rendering")
+        try {
+          const rendered = await ports.renderPage(input.pdf, pageNumber, input.settings.quality)
+          if (stopping) { mark(pageNumber, "cancelled"); break }
+          const file = await ports.client.uploadFile(rendered.blob, `page-${pageNumber}.png`, aborter.signal)
+          if (stopping) { mark(pageNumber, "cancelled"); break }
+          uploads.push({ pageNumber, fileUri: file.uri, mimeType: rendered.blob.type })
+          mark(pageNumber, "queued")
+        } catch {
+          mark(pageNumber, stopping ? "cancelled" : "failed", stopping ? undefined : "Could not render or upload page")
+        }
+      }
+      if (stopping) {
+        for (const upload of uploads) mark(upload.pageNumber, "cancelled")
+        break
+      }
+      if (!uploads.length) continue
+      try {
+        const jsonl = buildBatchJsonl(job.id, uploads, input.settings.sourceLanguage, input.settings.targetLanguage)
+        const file = await ports.client.uploadFile(jsonl, `batch-${job.batches.length + 1}.jsonl`, aborter.signal)
+        const name = await ports.client.submitBatch(input.settings.geminiModel, file.name, aborter.signal)
+        job.batches.push({ id: name, pageNumbers: uploads.map((upload) => upload.pageNumber), state: "JOB_STATE_PENDING" })
+        for (const upload of uploads) page(upload.pageNumber).batchId = name
+        emit()
+        await ports.registerBatch(input.tabId, name).catch(() => {})
+      } catch {
+        for (const upload of uploads) mark(upload.pageNumber, stopping ? "cancelled" : "failed", stopping ? undefined : "Could not submit Gemini batch")
+      }
+    }
+    if (stopping) {
+      for (const item of job.pages) {
+        if (!item.batchId && ["pending", "rendering", "queued"].includes(item.status)) mark(item.pageNumber, "cancelled")
+      }
+    }
+  })()
+
+  const finished = submission.then(async () => {
+    while (!stopping && job.batches.some((batch) => !TERMINAL.has(batch.state))) {
+      for (const batch of job.batches) {
+        if (stopping || TERMINAL.has(batch.state)) continue
+        try {
+          const status = await ports.client.getBatch(batch.id, aborter.signal)
+          if (TERMINAL.has(status.state)) {
+            await finishBatch(status)
+          } else {
+            batchState(batch.id, status.state)
+            for (const pageNumber of batch.pageNumbers) {
+              if (page(pageNumber).status === "queued" && status.state === "JOB_STATE_RUNNING") {
+                mark(pageNumber, "processing")
+              }
+            }
+          }
+        } catch {
+          if (!stopping) {
+            await finishBatch({ name: batch.id, state: "JOB_STATE_FAILED" })
+          }
+        }
+      }
+      if (!stopping && job.batches.some((batch) => !TERMINAL.has(batch.state))) {
+        await ports.sleep(input.settings.pollingIntervalMs)
+      }
+    }
+    emit()
+  }).catch(() => {
+    for (const item of job.pages) {
+      if (!["completed", "failed", "cancelled"].includes(item.status)) {
+        mark(item.pageNumber, stopping ? "cancelled" : "failed", "Translation stopped unexpectedly")
+      }
+    }
+  })
+
+  function cancel(): Promise<void> {
+    if (cancellation) return cancellation
+    stopping = true
+    aborter.abort()
+    cancellation = (async () => {
+      await submission
+      for (const batch of job.batches) {
+        if (TERMINAL.has(batch.state)) continue
+        try {
+          await ports.client.cancelBatch(batch.id)
+          const status = await ports.client.getBatch(batch.id)
+          if (TERMINAL.has(status.state)) await finishBatch(status)
+          else batchState(batch.id, status.state)
+        } catch {
+          batchState(batch.id, "CANCEL_UNCONFIRMED")
+        }
+      }
+      for (const item of job.pages) {
+        if (!item.batchId && ["pending", "rendering", "queued"].includes(item.status)) mark(item.pageNumber, "cancelled")
+      }
+      emit()
+    })()
+    return cancellation
+  }
+
+  return { finished, cancel }
+}
