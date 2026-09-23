@@ -55,7 +55,7 @@ export function PdfPreview() {
     let task: PDFDocumentLoadingTask | null = null
     try {
       url = URL.createObjectURL(file)
-      task = getDocument({ url })
+      task = getDocument({ url, wasmUrl: new URL("wasm/", window.location.href).href })
       objectUrlRef.current = url
       loadingTaskRef.current = task
       const loaded = await task.promise
@@ -108,7 +108,7 @@ export function PdfPreview() {
       currentCanvas.width = Math.max(1, Math.floor(viewport.width))
       currentCanvas.height = Math.max(1, Math.floor(viewport.height))
       currentCanvas.style.width = `${Math.round(base.width * cssScale)}px`
-      currentCanvas.style.height = `${Math.round(base.height * cssScale)}px`
+      currentCanvas.style.height = "auto"
       const task = page.render({ canvas: currentCanvas, viewport })
       renderTaskRef.current = task
       try {

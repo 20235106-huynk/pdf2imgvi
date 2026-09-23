@@ -14,6 +14,11 @@ test("dist contains every extension entry", async () => {
     "icons/icon-32.png",
     "icons/icon-48.png",
     "icons/icon-128.png",
+    "wasm/qcms_bg.wasm",
+    "wasm/jbig2.wasm",
+    "wasm/openjpeg.wasm",
+    "wasm/jbig2_nowasm_fallback.js",
+    "wasm/openjpeg_nowasm_fallback.js",
   ]) {
     await access(dist(path))
   }
@@ -38,6 +43,7 @@ test("dist contains every extension entry", async () => {
   const workerAsset = assetNames.find((name) => /^pdf\.worker\.min-.+\.mjs$/.test(name))
   assert.ok(workerAsset, "PDF.js worker must be emitted locally")
   assert.ok(javascript.includes(workerAsset), "workspace bundle must reference the local worker")
+  assert.ok(/wasmUrl:\s*new URL\(["`']wasm\//.test(javascript), "PDF.js must use local image decoders")
   for (const text of [
     "pdf2imgvi",
     "Open Translator",
