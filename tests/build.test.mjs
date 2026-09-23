@@ -52,6 +52,8 @@ test("dist contains every extension entry", async () => {
     "Choose PDF",
     "Remove PDF",
     "Pages to translate",
+    "Test Render",
+    "Rendered page",
     "Previous",
     "Next",
     "Save Changes",

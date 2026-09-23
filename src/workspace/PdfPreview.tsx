@@ -10,7 +10,9 @@ import {
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 
 import { Button } from "@/components/ui/button"
-import { parsePageSelection } from "./page-selection"
+import { renderPdfPage } from "@/services/pdf-renderer"
+import { getSettings } from "@/storage/settings.storage"
+import { parsePageRange } from "./page-selection"
 import { getPreviewScales } from "./preview-scale"
 
 GlobalWorkerOptions.workerSrc = workerUrl
@@ -22,7 +24,9 @@ export function PdfPreview() {
   const loadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const renderTaskRef = useRef<RenderTask | null>(null)
   const objectUrlRef = useRef<string | null>(null)
+  const testImageUrlRef = useRef<string | null>(null)
   const generationRef = useRef(0)
+  const testRequestRef = useRef(0)
   const [fileName, setFileName] = useState("")
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageNumber, setPageNumber] = useState(1)
@@ -30,6 +34,9 @@ export function PdfPreview() {
   const [loading, setLoading] = useState(false)
   const [rendering, setRendering] = useState(false)
   const [error, setError] = useState("")
+  const [testResult, setTestResult] = useState<{ url: string; pageNumber: number } | null>(null)
+  const [testBusy, setTestBusy] = useState(false)
+  const [testError, setTestError] = useState("")
 
   function releaseCurrent() {
     renderTaskRef.current?.cancel()
@@ -39,13 +46,25 @@ export function PdfPreview() {
     objectUrlRef.current = null
   }
 
+  function clearTestResult() {
+    testRequestRef.current += 1
+    if (testImageUrlRef.current) URL.revokeObjectURL(testImageUrlRef.current)
+    testImageUrlRef.current = null
+    setTestResult(null)
+    setTestError("")
+  }
+
   useEffect(() => () => {
     generationRef.current += 1
+    testRequestRef.current += 1
     releaseCurrent()
+    if (testImageUrlRef.current) URL.revokeObjectURL(testImageUrlRef.current)
   }, [])
 
   function removeFile() {
     generationRef.current += 1
+    clearTestResult()
+    setTestBusy(false)
     releaseCurrent()
     if (inputRef.current) inputRef.current.value = ""
     setPdf(null)
@@ -60,6 +79,8 @@ export function PdfPreview() {
 
   async function openFile(file: File) {
     const generation = ++generationRef.current
+    clearTestResult()
+    setTestBusy(false)
     releaseCurrent()
     setPdf(null)
     setPageNumber(1)
@@ -101,7 +122,46 @@ export function PdfPreview() {
     if (file) void openFile(file)
   }
 
-  const selectedPages = pdf ? parsePageSelection(pageSelection, pdf.numPages) : null
+  let selectedPages: number[] | null = null
+  let selectionWarning = ""
+  if (pdf) {
+    try {
+      selectedPages = parsePageRange(pageSelection, pdf.numPages)
+    } catch (cause) {
+      selectionWarning = cause instanceof Error ? cause.message : "Invalid page range."
+    }
+  }
+
+  async function testRender() {
+    if (!pdf || testBusy) return
+    let pages: number[]
+    try {
+      pages = parsePageRange(pageSelection, pdf.numPages)
+    } catch (cause) {
+      setTestError(cause instanceof Error ? cause.message : "Invalid page range.")
+      return
+    }
+    const generation = generationRef.current
+    clearTestResult()
+    const request = testRequestRef.current
+    setTestBusy(true)
+    try {
+      const settings = await getSettings()
+      if (generation !== generationRef.current || request !== testRequestRef.current) return
+      const rendered = await renderPdfPage(pdf, pages[0], settings.quality)
+      if (generation !== generationRef.current || request !== testRequestRef.current) return
+      const url = URL.createObjectURL(rendered.blob)
+      if (testImageUrlRef.current) URL.revokeObjectURL(testImageUrlRef.current)
+      testImageUrlRef.current = url
+      setTestResult({ url, pageNumber: rendered.pageNumber })
+    } catch {
+      if (generation === generationRef.current && request === testRequestRef.current) {
+        setTestError("Could not render the selected page. Please try again.")
+      }
+    } finally {
+      if (generation === generationRef.current) setTestBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (!pdf) return
@@ -175,7 +235,7 @@ export function PdfPreview() {
           <div className="w-full max-w-md text-left">
             <label htmlFor="page-selection" className="text-sm font-medium">Pages to translate</label>
             <input id="page-selection" type="text" value={pageSelection}
-              onChange={(event) => setPageSelection(event.target.value)}
+              onChange={(event) => { clearTestResult(); setPageSelection(event.target.value) }}
               aria-invalid={selectedPages === null}
               aria-describedby="page-selection-help page-selection-status"
               className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
@@ -186,9 +246,14 @@ export function PdfPreview() {
               className={`mt-1 text-sm ${selectedPages ? "text-muted-foreground" : "text-destructive"}`}>
               {selectedPages
                 ? `${selectedPages.length} ${selectedPages.length === 1 ? "page" : "pages"} selected`
-                : `Enter page numbers between 1 and ${pdf.numPages}.`}
+                : selectionWarning}
             </p>
           </div>
+          <Button type="button" variant="outline" disabled={testBusy || rendering}
+            onClick={() => void testRender()}>
+            {testBusy ? "Rendering test page…" : "Test Render"}
+          </Button>
+          {testError && <p role="alert" className="text-sm text-destructive">{testError}</p>}
           <div className="flex items-center gap-4">
             <Button type="button" variant="outline"
               disabled={rendering || pageNumber === 1}
@@ -201,6 +266,13 @@ export function PdfPreview() {
           <canvas ref={canvasRef} role="img"
             aria-label={`Preview of page ${pageNumber} of ${pdf.numPages}`}
             className="mx-auto max-w-full rounded border bg-white shadow-sm" />
+          {testResult && (
+            <section className="w-full text-center" aria-label="Test render result">
+              <h2 className="mb-3 text-lg font-medium">Rendered page {testResult.pageNumber}</h2>
+              <img src={testResult.url} alt={`Rendered page ${testResult.pageNumber}`}
+                className="mx-auto max-w-full rounded border bg-white shadow-sm" />
+            </section>
+          )}
         </>
       )}
     </main>
