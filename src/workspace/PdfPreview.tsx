@@ -10,12 +10,14 @@ import {
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 
 import { Button } from "@/components/ui/button"
+import { parsePageSelection } from "./page-selection"
 import { getPreviewScales } from "./preview-scale"
 
 GlobalWorkerOptions.workerSrc = workerUrl
 
 export function PdfPreview() {
   const inputRef = useRef<HTMLInputElement>(null)
+  const chooseButtonRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const loadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const renderTaskRef = useRef<RenderTask | null>(null)
@@ -24,6 +26,7 @@ export function PdfPreview() {
   const [fileName, setFileName] = useState("")
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageNumber, setPageNumber] = useState(1)
+  const [pageSelection, setPageSelection] = useState("")
   const [loading, setLoading] = useState(false)
   const [rendering, setRendering] = useState(false)
   const [error, setError] = useState("")
@@ -41,11 +44,26 @@ export function PdfPreview() {
     releaseCurrent()
   }, [])
 
+  function removeFile() {
+    generationRef.current += 1
+    releaseCurrent()
+    if (inputRef.current) inputRef.current.value = ""
+    setPdf(null)
+    setFileName("")
+    setPageNumber(1)
+    setPageSelection("")
+    setLoading(false)
+    setRendering(false)
+    setError("")
+    chooseButtonRef.current?.focus()
+  }
+
   async function openFile(file: File) {
     const generation = ++generationRef.current
     releaseCurrent()
     setPdf(null)
     setPageNumber(1)
+    setPageSelection("")
     setFileName(file.name)
     setError("")
     setLoading(true)
@@ -59,7 +77,10 @@ export function PdfPreview() {
       objectUrlRef.current = url
       loadingTaskRef.current = task
       const loaded = await task.promise
-      if (generation === generationRef.current) setPdf(loaded)
+      if (generation === generationRef.current) {
+        setPdf(loaded)
+        setPageSelection(`1-${loaded.numPages}`)
+      }
     } catch (cause) {
       if (generation !== generationRef.current) return
       setError(cause instanceof PasswordException
@@ -79,6 +100,8 @@ export function PdfPreview() {
     event.target.value = ""
     if (file) void openFile(file)
   }
+
+  const selectedPages = pdf ? parsePageSelection(pageSelection, pdf.numPages) : null
 
   useEffect(() => {
     if (!pdf) return
@@ -138,7 +161,10 @@ export function PdfPreview() {
       <input ref={inputRef} type="file" accept=".pdf,application/pdf"
         className="sr-only" tabIndex={-1} aria-label="Choose PDF file"
         onChange={pickFile} />
-      <Button type="button" onClick={() => inputRef.current?.click()}>Choose PDF</Button>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button ref={chooseButtonRef} type="button" onClick={() => inputRef.current?.click()}>Choose PDF</Button>
+        {fileName && <Button type="button" variant="outline" onClick={removeFile}>Remove PDF</Button>}
+      </div>
       {fileName && <p className="max-w-full break-all text-sm">{fileName}</p>}
       <p role="status" aria-live="polite" className="min-h-5 text-sm">
         {loading ? "Loading PDF…" : rendering ? "Rendering page…" : ""}
@@ -146,6 +172,23 @@ export function PdfPreview() {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {pdf && (
         <>
+          <div className="w-full max-w-md text-left">
+            <label htmlFor="page-selection" className="text-sm font-medium">Pages to translate</label>
+            <input id="page-selection" type="text" value={pageSelection}
+              onChange={(event) => setPageSelection(event.target.value)}
+              aria-invalid={selectedPages === null}
+              aria-describedby="page-selection-help page-selection-status"
+              className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            <p id="page-selection-help" className="mt-1 text-sm text-muted-foreground">
+              Use ranges or individual pages, e.g. 1-3, 5, 8-10.
+            </p>
+            <p id="page-selection-status" aria-live="polite" aria-atomic="true"
+              className={`mt-1 text-sm ${selectedPages ? "text-muted-foreground" : "text-destructive"}`}>
+              {selectedPages
+                ? `${selectedPages.length} ${selectedPages.length === 1 ? "page" : "pages"} selected`
+                : `Enter page numbers between 1 and ${pdf.numPages}.`}
+            </p>
+          </div>
           <div className="flex items-center gap-4">
             <Button type="button" variant="outline"
               disabled={rendering || pageNumber === 1}

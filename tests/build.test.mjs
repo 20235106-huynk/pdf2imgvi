@@ -50,6 +50,8 @@ test("dist contains every extension entry", async () => {
     "Settings",
     "Translate PDFs to Vietnamese",
     "Choose PDF",
+    "Remove PDF",
+    "Pages to translate",
     "Previous",
     "Next",
     "Save Changes",
@@ -57,7 +59,7 @@ test("dist contains every extension entry", async () => {
     "Session only",
     "Clear Translation Cache",
   ]) {
-    assert.match(javascript, new RegExp(text))
+    assert.ok(javascript.includes(text), `workspace bundle must contain ${text}`)
   }
 
   const popupScript = assetNames.find((name) => /^popup-.+\.js$/.test(name))
