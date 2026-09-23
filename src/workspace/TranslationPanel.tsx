@@ -10,12 +10,12 @@ import {
 } from "@/services/pdf-export.service"
 import { pdfDocumentOptions, renderPdfPage } from "@/services/pdf-renderer"
 import { abortableDelay, startTranslation } from "@/services/translation-job"
-import { resumeJob, retryFailedPages } from "@/services/translation-recovery.service"
+import { recalculateJobProgress, resumeJob, retryFailedPages } from "@/services/translation-recovery.service"
 import { getApiKey } from "@/storage/api-key.storage"
 import { registerBatch, unregisterBatch } from "@/storage/active-batches.storage"
 import {
   createBatchRecord, createJob, deleteJob, getBatchesByJob, getJob, getPageImage, getPagesByJob, listJobs,
-  saveCompletedPage, saveJobSnapshot, updateBatch,
+  saveCompletedPage, saveJobSnapshot, updateBatch, updatePageRecord,
   type LocalBatchStatus, type PageMetadata, type StoredJob, type StoredPage, type TranslationBatchRecord,
 } from "@/storage/results.storage"
 import { getSettings } from "@/storage/settings.storage"
@@ -503,6 +503,22 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
     }
   }
 
+  async function markPageForRegeneration(pageNumber: number) {
+    if (!viewed || running || exportingJobId) return
+    setError("")
+    try {
+      await updatePageRecord(viewed.job.id, pageNumber, {
+        status: "failed",
+        error: "Marked for regeneration by user",
+      })
+      const updatedJob = await recalculateJobProgress(viewed.job.id)
+      await Promise.all([refreshJobs(), openSaved(updatedJob)])
+      await syncActiveJob(viewed.job.id)
+    } catch {
+      setError("Could not mark this page for regeneration.")
+    }
+  }
+
   async function handleExport(
     jobId: string,
     completedCount: number,
@@ -775,10 +791,20 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
               </div>
               <div className="flex flex-wrap gap-2">
                 {viewed.pages.map((page) => (
-                  <Button key={page.pageNumber} type="button" variant={selectedPage === page.pageNumber ? "default" : "outline"}
-                    onClick={() => setSelectedPage(page.status === "completed" ? page.pageNumber : null)}>
-                    Page {page.pageNumber}: {page.status}
-                  </Button>
+                  <div key={page.pageNumber} className="flex items-center gap-1">
+                    <Button type="button" variant={selectedPage === page.pageNumber ? "default" : "outline"}
+                      onClick={() => setSelectedPage(page.status === "completed" ? page.pageNumber : null)}>
+                      Page {page.pageNumber}: {page.status}
+                    </Button>
+                    {page.status === "completed" && (
+                      <Button type="button" variant="destructive" size="icon"
+                        disabled={running || exportingJobId !== null}
+                        aria-label={`Mark page ${page.pageNumber} for regeneration`}
+                        onClick={() => void markPageForRegeneration(page.pageNumber)}>
+                        ×
+                      </Button>
+                    )}
+                  </div>
                 ))}
               </div>
               {viewed.pages.filter((page) => page.error).map((page) =>

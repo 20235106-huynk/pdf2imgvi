@@ -849,3 +849,77 @@ test("retrying failed pages automatically updates active job box to completed wh
   assert.equal(stateMap.get(0).status, "completed")
   assert.equal(stateMap.get(0).failedPages, 0)
 })
+
+test("completed page can be marked for regeneration without starting Gemini", async () => {
+  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
+  const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
+  const elements = (type, props) => ({ type, props })
+  const savedJob = {
+    id: "job-regenerate-1",
+    fileName: "doc.pdf",
+    fileSize: 1024,
+    totalPages: 2,
+    selectedPages: [1, 2],
+    status: "completed",
+    completedPages: 2,
+    failedPages: 0,
+    cancelledPages: 0,
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+  const pages = [1, 2].map((pageNumber) => ({
+    jobId: savedJob.id,
+    pageNumber,
+    status: "completed",
+    createdAt: 1000,
+    updatedAt: 2000,
+  }))
+  const stateValues = [
+    null, false, false, false, false, "", [savedJob], { job: savedJob, pages }, 1, "",
+    null, null, null, null, "", false, null, "", null,
+  ]
+  const updatedPages = []
+  let retryCalls = 0
+  let stateIndex = 0
+  const context = {
+    useEffect: () => {},
+    useRef: (current) => ({ current }),
+    useState: () => [stateValues[stateIndex++], () => {}],
+    _jsx: elements,
+    _jsxs: elements,
+    Button: "Button",
+    AbortController: globalThis.AbortController,
+    createGeminiBatchClient: () => ({}),
+    startTranslation: () => ({ finished: Promise.resolve(), cancel: async () => {} }),
+    resumeJob: async () => {},
+    retryFailedPages: async () => { retryCalls += 1 },
+    updatePageRecord: async (jobId, pageNumber, patch) => { updatedPages.push({ jobId, pageNumber, patch }) },
+    recalculateJobProgress: async () => ({ ...savedJob, completedPages: 1, failedPages: 1, status: "completed_with_errors" }),
+    listJobs: async () => [savedJob],
+    getPagesByJob: async () => pages,
+    getBatchesByJob: async () => [],
+    translationProgressLabel: () => "Completed",
+    window: { addEventListener: () => {}, removeEventListener: () => {} },
+  }
+  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  const tree = context.Panel({ pdf: null, fileName: "", fileSize: 0, selectedPages: null, onRunningChange: () => {} })
+  const findByLabel = (node, label) => {
+    if (!node) return null
+    if (Array.isArray(node)) return node.map((item) => findByLabel(item, label)).find(Boolean) ?? null
+    if (typeof node !== "object") return null
+    if (node.props?.["aria-label"] === label) return node
+    return findByLabel(node.props?.children, label)
+  }
+  const markButton = findByLabel(tree, "Mark page 1 for regeneration")
+  assert.ok(markButton)
+  markButton.props.onClick()
+  await new Promise(setImmediate)
+
+  assert.equal(updatedPages.length, 1)
+  assert.equal(updatedPages[0].jobId, savedJob.id)
+  assert.equal(updatedPages[0].pageNumber, 1)
+  assert.equal(updatedPages[0].patch.status, "failed")
+  assert.equal(updatedPages[0].patch.error, "Marked for regeneration by user")
+  assert.equal(retryCalls, 0)
+})
