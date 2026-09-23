@@ -14,6 +14,7 @@ import { renderPdfPage } from "@/services/pdf-renderer"
 import { getSettings } from "@/storage/settings.storage"
 import { parsePageRange } from "./page-selection"
 import { getPreviewScales } from "./preview-scale"
+import { TranslationPanel } from "./TranslationPanel"
 
 GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -37,6 +38,7 @@ export function PdfPreview() {
   const [testResult, setTestResult] = useState<{ url: string; pageNumber: number } | null>(null)
   const [testBusy, setTestBusy] = useState(false)
   const [testError, setTestError] = useState("")
+  const [translationRunning, setTranslationRunning] = useState(false)
 
   function releaseCurrent() {
     renderTaskRef.current?.cancel()
@@ -62,6 +64,7 @@ export function PdfPreview() {
   }, [])
 
   function removeFile() {
+    if (translationRunning) return
     generationRef.current += 1
     clearTestResult()
     setTestBusy(false)
@@ -78,6 +81,7 @@ export function PdfPreview() {
   }
 
   async function openFile(file: File) {
+    if (translationRunning) return
     const generation = ++generationRef.current
     clearTestResult()
     setTestBusy(false)
@@ -119,7 +123,7 @@ export function PdfPreview() {
   function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ""
-    if (file) void openFile(file)
+    if (file && !translationRunning) void openFile(file)
   }
 
   let selectedPages: number[] | null = null
@@ -218,12 +222,12 @@ export function PdfPreview() {
     <main className={`mx-auto flex min-h-[calc(100vh-5rem)] max-w-5xl flex-col items-center gap-4 p-6 text-center ${pdf ? "justify-start" : "justify-center"}`}>
       <h1 className="text-3xl font-semibold">pdf2imgvi</h1>
       <p className="text-muted-foreground">Translate PDFs to Vietnamese</p>
-      <input ref={inputRef} type="file" accept=".pdf,application/pdf"
+      <input ref={inputRef} type="file" accept=".pdf,application/pdf" disabled={translationRunning}
         className="sr-only" tabIndex={-1} aria-label="Choose PDF file"
         onChange={pickFile} />
       <div className="flex flex-wrap justify-center gap-2">
-        <Button ref={chooseButtonRef} type="button" onClick={() => inputRef.current?.click()}>Choose PDF</Button>
-        {fileName && <Button type="button" variant="outline" onClick={removeFile}>Remove PDF</Button>}
+        <Button ref={chooseButtonRef} type="button" disabled={translationRunning} onClick={() => inputRef.current?.click()}>Choose PDF</Button>
+        {fileName && <Button type="button" variant="outline" disabled={translationRunning} onClick={removeFile}>Remove PDF</Button>}
       </div>
       {fileName && <p className="max-w-full break-all text-sm">{fileName}</p>}
       <p role="status" aria-live="polite" className="min-h-5 text-sm">
@@ -234,7 +238,7 @@ export function PdfPreview() {
         <>
           <div className="w-full max-w-md text-left">
             <label htmlFor="page-selection" className="text-sm font-medium">Pages to translate</label>
-            <input id="page-selection" type="text" value={pageSelection}
+            <input id="page-selection" type="text" value={pageSelection} disabled={translationRunning}
               onChange={(event) => { clearTestResult(); setPageSelection(event.target.value) }}
               aria-invalid={selectedPages === null}
               aria-describedby="page-selection-help page-selection-status"
@@ -249,7 +253,7 @@ export function PdfPreview() {
                 : selectionWarning}
             </p>
           </div>
-          <Button type="button" variant="outline" disabled={testBusy || rendering}
+          <Button type="button" variant="outline" disabled={testBusy || rendering || translationRunning}
             onClick={() => void testRender()}>
             {testBusy ? "Rendering test page…" : "Test Render"}
           </Button>
@@ -275,6 +279,8 @@ export function PdfPreview() {
           )}
         </>
       )}
+      <TranslationPanel pdf={pdf} fileName={fileName} selectedPages={selectedPages}
+        onRunningChange={setTranslationRunning} />
     </main>
   )
 }

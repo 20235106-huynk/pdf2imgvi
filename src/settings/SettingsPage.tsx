@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { getApiKey, saveApiKey } from "@/storage/api-key.storage"
 import { getSettings, saveSettings } from "@/storage/settings.storage"
+import { listCompletedPages, removeResults } from "@/storage/results.storage"
 import {
   DEFAULT_SETTINGS,
   MAX_BATCH_SIZE,
@@ -238,9 +239,16 @@ export function SettingsPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => {
-              setFeedback("Saved results can be removed from the Translator view.")
-            }}
+            onClick={() => void (async () => {
+              try {
+                const rows = await listCompletedPages()
+                await Promise.all([...new Set(rows.map((row) => row.jobId))].map(removeResults))
+                window.dispatchEvent(new Event("pdf2imgvi-results-changed"))
+                setFeedback("Translation cache cleared.")
+              } catch {
+                setFeedback("Could not clear translation cache.")
+              }
+            })()}
           >
             Clear Translation Cache
           </Button>
