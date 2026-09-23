@@ -7,6 +7,8 @@ export type PageStatus =
   | "failed"
   | "cancelled"
 
+export type BatchStatus = "pending" | "running" | "completed" | "failed" | "cancelled"
+
 export interface TranslationPageJob {
   pageNumber: number
   status: PageStatus
@@ -17,7 +19,7 @@ export interface TranslationPageJob {
 export interface TranslationBatchJob {
   id: string
   pageNumbers: number[]
-  state: string
+  state: BatchStatus
 }
 
 export interface TranslationJob {
@@ -28,6 +30,7 @@ export interface TranslationJob {
   failedPages: number
   cancelledPages: number
   status: "running" | "completed" | "failed" | "cancelled"
+  stage: "preparing" | "submitted" | "waiting" | "finished"
 }
 
 export interface BatchPageResult {

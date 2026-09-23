@@ -13,6 +13,16 @@ test("translation start requires a PDF, valid page range, and Gemini API key", a
   assert.equal(translationStartError({}, [1], "key"), null)
 })
 
+test("translation progress labels distinguish preparation, submission, polling, and completion", async () => {
+  const { translationProgressLabel } = await import("../src/workspace/translation-start.ts")
+  const job = { status: "running", stage: "preparing" }
+  assert.equal(translationProgressLabel(job), "Preparing pages…")
+  assert.equal(translationProgressLabel({ ...job, stage: "submitted" }), "Batch submitted")
+  assert.equal(translationProgressLabel({ ...job, stage: "waiting" }), "Waiting for Gemini…")
+  assert.equal(translationProgressLabel({ status: "completed", stage: "finished" }), "Translation completed")
+  assert.equal(translationProgressLabel({ status: "failed", stage: "finished" }), "Translation finished with errors")
+})
+
 test("a newly completed page refreshes saved images before the whole run finishes", async () => {
   const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
@@ -28,6 +38,7 @@ test("a newly completed page refreshes saved images before the whole run finishe
     _jsx: elements,
     _jsxs: elements,
     Button: "Button",
+    abortableDelay: async () => {},
     createGeminiBatchClient: () => ({}),
     renderPdfPage: () => {},
     startTranslation: ({ onChange }) => {
@@ -43,6 +54,7 @@ test("a newly completed page refreshes saved images before the whole run finishe
     removeResults: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
+    translationProgressLabel: () => "Preparing pages…",
     chrome: { runtime: { sendMessage: async () => ({ tabId: 12 }) } },
     setTimeout,
   }

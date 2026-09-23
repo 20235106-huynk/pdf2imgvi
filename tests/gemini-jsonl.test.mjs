@@ -27,6 +27,7 @@ test("builds Gemini image requests with stable page keys and file URIs", async (
   assert.equal(rows[0].request.contents[0].parts[1].file_data.mime_type, "image/png")
   assert.deepEqual(rows[0].request.generation_config.responseModalities, ["TEXT", "IMAGE"])
   assert.match(rows[0].request.contents[0].parts[0].text, /Vietnamese|vi/i)
+  assert.match(rows[0].request.contents[0].parts[0].text, /complete.*image/i)
 })
 
 test("maps reversed image results by key and isolates keyed failures", async () => {

@@ -1,7 +1,5 @@
 import type { BatchPageResult } from "../types/translation.ts"
-
-const PROMPT = (sourceLanguage: string, targetLanguage: string) =>
-  `Translate all text in this PDF page image from ${sourceLanguage} to ${targetLanguage} (Vietnamese). Return a translated page image. Preserve the original layout, figures, diagrams, tables, and formulas. Do not omit content or alter non-text elements unnecessarily.`
+import { translationPrompt } from "./translation-prompt.ts"
 
 export function splitIntoBatches<T>(items: readonly T[], size: number): T[][] {
   if (!Number.isSafeInteger(size) || size < 1) throw new RangeError("Invalid batch size")
@@ -19,7 +17,7 @@ export function buildBatchJsonl(
     key: `${jobId}:page:${pageNumber}`,
     request: {
       contents: [{ parts: [
-        { text: PROMPT(sourceLanguage, targetLanguage) },
+        { text: translationPrompt(sourceLanguage, targetLanguage) },
         { file_data: { mime_type: mimeType, file_uri: fileUri } },
       ] }],
       generation_config: { responseModalities: ["TEXT", "IMAGE"] },

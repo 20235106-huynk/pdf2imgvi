@@ -4,13 +4,13 @@ import type { PDFDocumentProxy } from "pdfjs-dist"
 import { Button } from "@/components/ui/button"
 import { createGeminiBatchClient } from "@/services/gemini-batch"
 import { renderPdfPage } from "@/services/pdf-renderer"
-import { startTranslation } from "@/services/translation-job"
+import { abortableDelay, startTranslation } from "@/services/translation-job"
 import { getApiKey } from "@/storage/api-key.storage"
 import { registerBatch, unregisterBatch } from "@/storage/active-batches.storage"
 import { listCompletedPages, removeResults, saveCompletedPage, type CompletedPage } from "@/storage/results.storage"
 import { getSettings } from "@/storage/settings.storage"
 import type { TranslationJob } from "@/types/translation"
-import { translationStartError } from "./translation-start"
+import { translationProgressLabel, translationStartError } from "./translation-start"
 
 interface Props {
   pdf: PDFDocumentProxy | null
@@ -19,7 +19,7 @@ interface Props {
   onRunningChange: (running: boolean) => void
 }
 
-const TERMINAL_BATCH = new Set(["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"])
+const TERMINAL_BATCH = new Set(["completed", "failed", "cancelled"])
 
 export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange }: Props) {
   const [job, setJob] = useState<TranslationJob | null>(null)
@@ -93,7 +93,7 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
         saveCompletedPage,
         registerBatch,
         unregisterBatch,
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        sleep: abortableDelay,
       })
       runRef.current = run
       setRunning(true)
@@ -148,8 +148,8 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
 
   const savedJobs = [...new Map(saved.map((row) => [row.jobId, row.fileName])).entries()]
   const selected = saved.find((row) => `${row.jobId}:${row.pageNumber}` === selectedResult)
-  const completedBatches = job?.batches.filter((batch) => batch.state === "JOB_STATE_SUCCEEDED").length ?? 0
-  const failedBatches = job?.batches.filter((batch) => ["JOB_STATE_FAILED", "JOB_STATE_EXPIRED"].includes(batch.state)).length ?? 0
+  const completedBatches = job?.batches.filter((batch) => batch.state === "completed").length ?? 0
+  const failedBatches = job?.batches.filter((batch) => batch.state === "failed").length ?? 0
   const activeBatches = job?.batches.filter((batch) => !TERMINAL_BATCH.has(batch.state)).length ?? 0
 
   return (
@@ -168,6 +168,7 @@ export function TranslationPanel({ pdf, fileName, selectedPages, onRunningChange
       {error && <p role="alert" className="text-center text-sm text-destructive">{error}</p>}
       {job && (
         <div className="rounded-md border p-4" aria-live="polite">
+          <p className="font-medium">{translationProgressLabel(job)}</p>
           <p>{job.completedPages} completed · {job.failedPages} failed · {job.cancelledPages} cancelled / {job.pages.length} selected</p>
           <p className="text-sm text-muted-foreground">Batches: {completedBatches} completed · {activeBatches} pending/running · {failedBatches} failed</p>
           {job.pages.filter((page) => page.error).map((page) =>

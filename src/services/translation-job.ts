@@ -4,7 +4,7 @@ import { buildBatchJsonl, parseBatchResults, splitIntoBatches } from "./gemini-j
 import type { GeminiBatchClient, GeminiBatchStatus } from "./gemini-batch.ts"
 import type { RenderedPage } from "./pdf-renderer.ts"
 import type { AppSettings } from "../types/settings.ts"
-import type { PageStatus, TranslationJob, TranslationPageJob } from "../types/translation.ts"
+import type { BatchStatus, PageStatus, TranslationJob, TranslationPageJob } from "../types/translation.ts"
 
 export interface TranslationInput {
   pdf: PDFDocumentProxy
@@ -22,10 +22,20 @@ export interface TranslationPorts {
   saveCompletedPage: (jobId: string, fileName: string, pageNumber: number, image: Blob) => Promise<void>
   registerBatch: (tabId: number, batchName: string) => Promise<void>
   unregisterBatch: (tabId: number, batchName: string) => Promise<void>
-  sleep: (ms: number) => Promise<void>
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
-const TERMINAL = new Set(["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"])
+const TERMINAL = new Set<BatchStatus>(["completed", "failed", "cancelled"])
+
+export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException("Aborted", "AbortError")); return }
+    const timer = setTimeout(() => { cleanup(); resolve() }, ms)
+    const abort = () => { clearTimeout(timer); cleanup(); reject(new DOMException("Aborted", "AbortError")) }
+    const cleanup = () => signal?.removeEventListener("abort", abort)
+    signal?.addEventListener("abort", abort, { once: true })
+  })
+}
 
 export function startTranslation(input: TranslationInput, ports: TranslationPorts): {
   finished: Promise<void>
@@ -42,6 +52,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     failedPages: 0,
     cancelledPages: 0,
     status: "running",
+    stage: "preparing",
   }
   const aborter = new AbortController()
   let stopping = false
@@ -54,6 +65,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     job.cancelledPages = job.pages.filter((page) => page.status === "cancelled").length
     if (job.pages.every((page) => ["completed", "failed", "cancelled"].includes(page.status))) {
       job.status = job.failedPages ? "failed" : job.cancelledPages ? "cancelled" : "completed"
+      job.stage = "finished"
     }
     input.onChange({
       ...job,
@@ -76,9 +88,9 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     emit()
   }
 
-  function batchState(name: string, state: string): void {
+  function batchState(name: string, state: BatchStatus): void {
     const batch = job.batches.find((item) => item.id === name)
-    if (batch) {
+    if (batch && !TERMINAL.has(batch.state)) {
       batch.state = state
       emit()
     }
@@ -89,7 +101,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     if (!batch || finalized.has(status.name)) return
     finalized.add(status.name)
     batchState(status.name, status.state)
-    if (status.state === "JOB_STATE_SUCCEEDED") {
+    if (status.state === "completed") {
       try {
         if (!status.responseFile) throw new Error("Missing Gemini results file")
         const jsonl = await ports.client.downloadResults(status.responseFile)
@@ -109,7 +121,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
       } catch {
         for (const pageNumber of batch.pageNumbers) mark(pageNumber, "failed", "Could not read Gemini batch results")
       }
-    } else if (status.state === "JOB_STATE_CANCELLED") {
+    } else if (status.state === "cancelled") {
       for (const pageNumber of batch.pageNumbers) mark(pageNumber, "cancelled")
     } else {
       for (const pageNumber of batch.pageNumbers) mark(pageNumber, "failed", "Gemini batch failed")
@@ -146,8 +158,9 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         const jsonl = buildBatchJsonl(job.id, uploads, input.settings.sourceLanguage, input.settings.targetLanguage)
         const file = await ports.client.uploadFile(jsonl, `batch-${job.batches.length + 1}.jsonl`, aborter.signal)
         const name = await ports.client.submitBatch(input.settings.geminiModel, file.name, aborter.signal)
-        job.batches.push({ id: name, pageNumbers: uploads.map((upload) => upload.pageNumber), state: "JOB_STATE_PENDING" })
+        job.batches.push({ id: name, pageNumbers: uploads.map((upload) => upload.pageNumber), state: "pending" })
         for (const upload of uploads) page(upload.pageNumber).batchId = name
+        job.stage = "submitted"
         emit()
         await ports.registerBatch(input.tabId, name).catch(() => {})
       } catch {
@@ -162,6 +175,10 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
   })()
 
   const finished = submission.then(async () => {
+    if (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
+      job.stage = "waiting"
+      emit()
+    }
     while (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
       for (const batch of job.batches) {
         if (TERMINAL.has(batch.state)) continue
@@ -172,17 +189,19 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
           } else {
             batchState(batch.id, status.state)
             for (const pageNumber of batch.pageNumbers) {
-              if (page(pageNumber).status === "queued" && status.state === "JOB_STATE_RUNNING") {
+              if (page(pageNumber).status === "queued" && status.state === "running") {
                 mark(pageNumber, "processing")
               }
             }
           }
-        } catch {
-          if (!TERMINAL.has(batch.state)) batchState(batch.id, "STATUS_UNAVAILABLE")
-        }
+        } catch { /* Keep polling; a status request can fail temporarily. */ }
       }
       if (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
-        await ports.sleep(input.settings.pollingIntervalMs)
+        try {
+          await ports.sleep(input.settings.pollingIntervalMs, stopping ? undefined : aborter.signal)
+        } catch (error) {
+          if (!stopping) throw error
+        }
       }
     }
     emit()
@@ -204,16 +223,12 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         if (TERMINAL.has(batch.state)) continue
         try {
           await ports.client.cancelBatch(batch.id)
-        } catch {
-          batchState(batch.id, "CANCEL_UNCONFIRMED")
-        }
+        } catch { /* Keep the batch active until Gemini reports a terminal state. */ }
         try {
           const status = await ports.client.getBatch(batch.id)
           if (TERMINAL.has(status.state)) await finishBatch(status)
           else batchState(batch.id, status.state)
-        } catch {
-          batchState(batch.id, "CANCEL_UNCONFIRMED")
-        }
+        } catch { /* Keep the batch active until Gemini reports a terminal state. */ }
       }
       for (const item of job.pages) {
         if (!item.batchId && ["pending", "rendering", "queued"].includes(item.status)) mark(item.pageNumber, "cancelled")
