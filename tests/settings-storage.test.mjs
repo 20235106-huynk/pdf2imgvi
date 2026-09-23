@@ -51,7 +51,7 @@ test("settings load defaults, normalize before saving, and reset", async () => {
     sourceLanguage: "ja",
     apiKey: "must-not-persist",
   })
-  assert.equal((await getSettings()).concurrency, 20)
+  assert.equal((await getSettings()).concurrency, 30)
   assert.equal((await getSettings()).sourceLanguage, "ja")
   assert.equal("apiKey" in local.values.get("appSettings"), false)
   assert.equal(session.values.size, 0)

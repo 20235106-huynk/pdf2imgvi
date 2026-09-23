@@ -2,7 +2,6 @@ export type ApiKeyStorageMode = "local" | "session"
 export type OutputQuality = "standard" | "high" | "very-high"
 
 export interface AppSettings {
-  providerId: string
   modelId: string
   sourceLanguage: string
   targetLanguage: string
@@ -15,7 +14,10 @@ export interface AppSettings {
 }
 
 export const MODEL_OPTIONS = [
-  { value: "nano-banana-lite-2", label: "Nano Banana Lite 2" },
+  { value: "gemini-3.1-flash-lite-image", label: "Gemini 3.1 Flash Lite" },
+  { value: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash" },
+  { value: "gemini-3-pro-image", label: "Gemini 3 Pro" },
+  { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash" },
 ] as const
 
 export const SOURCE_LANGUAGE_OPTIONS = [
@@ -36,11 +38,10 @@ export const QUALITY_OPTIONS = [
 ] as const
 
 export const MIN_CONCURRENCY = 1
-export const MAX_CONCURRENCY = 20
-export const DEFAULT_CONCURRENCY = 10
+export const MAX_CONCURRENCY = 30
+export const DEFAULT_CONCURRENCY = 15
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  providerId: "gemini",
   modelId: MODEL_OPTIONS[0].value,
   sourceLanguage: SOURCE_LANGUAGE_OPTIONS[0].value,
   targetLanguage: TARGET_LANGUAGE_OPTIONS[0].value,
@@ -64,10 +65,6 @@ export function normalizeSettings(value: unknown): AppSettings {
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
 
   return {
-    providerId:
-      typeof input.providerId === "string" && input.providerId.trim()
-        ? input.providerId.trim()
-        : DEFAULT_SETTINGS.providerId,
     modelId: isOption(input.modelId, MODEL_OPTIONS)
       ? input.modelId
       : DEFAULT_SETTINGS.modelId,

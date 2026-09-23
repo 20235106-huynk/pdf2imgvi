@@ -14,7 +14,7 @@ test("missing settings use the single default object", () => {
   assert.equal(DEFAULT_SETTINGS.sourceLanguage, "en")
   assert.equal(DEFAULT_SETTINGS.targetLanguage, "vi")
   assert.equal(DEFAULT_SETTINGS.quality, "standard")
-  assert.equal(DEFAULT_SETTINGS.concurrency, 10)
+  assert.equal(DEFAULT_SETTINGS.concurrency, 15)
   assert.equal(DEFAULT_SETTINGS.maxRetries, 3)
   assert.equal(DEFAULT_SETTINGS.outputFilenameTemplate, "{original}_vi.pdf")
   assert.equal("apiKey" in DEFAULT_SETTINGS, false)
