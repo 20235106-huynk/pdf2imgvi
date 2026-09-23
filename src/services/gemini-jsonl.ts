@@ -26,11 +26,9 @@ export function buildBatchJsonl(
       generation_config: {
         responseModalities: ["TEXT","IMAGE"],
         imageConfig: {
-          aspectRatio: "9:16",
           imageSize: imageSize,
         },
-        "temperature": 0.9,
-        "topP": 0.85,
+        "temperature": 0.2,
       },
     },
   })).join("\n")

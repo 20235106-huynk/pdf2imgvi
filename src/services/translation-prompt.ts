@@ -6,5 +6,5 @@ const LANGUAGE_OPTIONS = [...SOURCE_LANGUAGE_OPTIONS, ...TARGET_LANGUAGE_OPTIONS
 export function translationPrompt(sourceLanguage: string, targetLanguage: string): string {
   const source = LANGUAGE_OPTIONS.find(({ value }) => value === sourceLanguage)?.label ?? sourceLanguage
   const target = LANGUAGE_OPTIONS.find(({ value }) => value === targetLanguage)?.label ?? targetLanguage
-  return `Translate all ${source} text to ${target}. Preserve the original layout, style, colors, text positions, images, tables, diagrams, formulas, and aspect ratio. Keep technical terms, proper nouns, abbreviations, code, symbols, and units unchanged. Fit translations within the original text areas. Output only the translated image.`
+  return `Render an updated image of the original image with all visible ${source} text translated into ${target}. Preserve the original layout, style, colors, text positions, images, tables, diagrams and formulas. Keep specialized vocabulary, proper nouns, abbreviations, code, symbols, and units unchanged. Output only the translated image.`
 }
