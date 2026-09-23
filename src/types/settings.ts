@@ -45,8 +45,8 @@ export const QUALITY_OPTIONS = [
 
 export const MIN_BATCH_SIZE = 1
 export const MAX_BATCH_SIZE = 20
-export const MIN_POLLING_INTERVAL_MS = 3000
-export const MAX_POLLING_INTERVAL_MS = 60000
+export const MIN_POLLING_INTERVAL_MS = 30000
+export const MAX_POLLING_INTERVAL_MS = 150000
 
 export const DEFAULT_SETTINGS: AppSettings = {
   geminiModel: MODEL_OPTIONS[0].value,
@@ -54,7 +54,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   targetLanguage: TARGET_LANGUAGE_OPTIONS[0].value,
   quality: QUALITY_OPTIONS[0].value,
   batchSize: 5,
-  pollingIntervalMs: 3000,
+  pollingIntervalMs: 120000,
   outputFilenameTemplate: "{original}_vi.pdf",
   apiKeyStorageMode: "local",
 }

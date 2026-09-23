@@ -148,6 +148,7 @@ test("cancel preserves a batch result that completes before cancellation confirm
   const pendingPoll = new Promise((resolve) => { polled = resolve })
   const heldSleep = new Promise((resolve) => { releaseSleep = resolve })
   let statusCalls = 0
+  let sleepCalls = 0
   let cancelCalls = 0
   const race = fixturePorts({
     client: {
@@ -165,7 +166,11 @@ test("cancel preserves a batch result that completes before cancellation confirm
         response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("one") } }] } }] },
       }),
     },
-    sleep: async () => heldSleep,
+    sleep: async () => {
+      sleepCalls += 1
+      if (sleepCalls === 1) return
+      return heldSleep
+    },
   })
   const raceRun = await start(input([1], (job) => raceSnapshots.push(job)), race.ports)
   await pendingPoll
@@ -217,6 +222,7 @@ test("pending cancellation keeps polling and collects a later success even if ca
   const polled = new Promise((resolve) => { firstPoll = resolve })
   const heldSleep = new Promise((resolve) => { releaseSleep = resolve })
   let calls = 0
+  let sleepCalls = 0
   ports.client.getBatch = async (name) => {
     calls += 1
     if (calls === 1) { firstPoll(); return { name, state: "pending" } }
@@ -228,7 +234,11 @@ test("pending cancellation keeps polling and collects a later success even if ca
     key: `${snapshots[0].id}:page:1`,
     response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("one") } }] } }] },
   })
-  ports.sleep = async () => heldSleep
+  ports.sleep = async () => {
+    sleepCalls += 1
+    if (sleepCalls === 1) return
+    return heldSleep
+  }
   const run = await start(input([1], (job) => snapshots.push(job)), ports)
   await polled
   await run.cancel()
@@ -247,6 +257,7 @@ test("an unconfirmed cancellation can be explicitly requested again", async () =
   const polled = new Promise((resolve) => { firstPoll = resolve })
   const heldSleep = new Promise((resolve) => { releaseSleep = resolve })
   let statusCalls = 0
+  let sleepCalls = 0
   let cancelCalls = 0
   ports.client.getBatch = async (name) => {
     statusCalls += 1
@@ -255,7 +266,11 @@ test("an unconfirmed cancellation can be explicitly requested again", async () =
     return { name, state: "cancelled" }
   }
   ports.client.cancelBatch = async () => { cancelCalls += 1 }
-  ports.sleep = async () => heldSleep
+  ports.sleep = async () => {
+    sleepCalls += 1
+    if (sleepCalls === 1) return
+    return heldSleep
+  }
   const run = await start(input([1], (job) => snapshots.push(job)), ports)
   await polled
   await run.cancel()
@@ -271,15 +286,10 @@ test("cancellation interrupts the polling delay but still collects a completed b
   const snapshots = []
   let delayBegun
   const delayStarted = new Promise((resolve) => { delayBegun = resolve })
-  let polls = 0
   let abortedDelay = false
   const { saved, ports } = fixturePorts({
     client: {
-      getBatch: async (name) => {
-        polls += 1
-        if (polls === 1) return { name, state: "pending" }
-        return { name, state: "completed", responseFile: "files/output" }
-      },
+      getBatch: async (name) => ({ name, state: "completed", responseFile: "files/output" }),
       downloadResults: async () => JSON.stringify({
         key: `${snapshots[0].id}:page:1`,
         response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("one") } }] } }] },
@@ -318,6 +328,7 @@ test("a stale poll cannot reopen a batch completed during cancellation", async (
   const started = new Promise((resolve) => { pollStarted = resolve })
   const stalePoll = new Promise((resolve) => { releaseStalePoll = resolve })
   let polls = 0
+  let sleepCalls = 0
   const { ports } = fixturePorts({
     client: {
       getBatch: async (name) => {
@@ -330,7 +341,11 @@ test("a stale poll cannot reopen a batch completed during cancellation", async (
         response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("one") } }] } }] },
       }),
     },
-    sleep: async () => new Promise(() => {}),
+    sleep: async () => {
+      sleepCalls += 1
+      if (sleepCalls === 1) return
+      return new Promise(() => {})
+    },
   })
   const run = await start(input([1], (job) => snapshots.push(job)), ports)
   await started
@@ -346,17 +361,32 @@ test("a stale poll cannot reopen a batch completed during cancellation", async (
   assert.equal(snapshots.at(-1).status, "completed")
 })
 
-test("persists batch record immediately after submission", async () => {
+test("updates the persisted batch record after Gemini completes", async () => {
   const createdBatches = []
   const { ports } = fixturePorts({
     createBatchRecord: async (record) => { createdBatches.push(record) },
+    updateBatch: async (id, patch) => {
+      const batch = createdBatches.find((record) => record.id === id)
+      if (batch) Object.assign(batch, patch)
+    },
   })
   const run = await start(input([1], () => {}), ports)
   await run.finished
   assert.equal(createdBatches.length, 1)
   assert.equal(createdBatches[0].batchName, "batches/b1")
-  assert.equal(createdBatches[0].status, "submitted")
+  assert.equal(createdBatches[0].status, "succeeded")
   assert.deepEqual(createdBatches[0].pageNumbers, [1])
+})
+
+test("cancels a submitted batch and reports local persistence failure", async () => {
+  const cancelled = []
+  const { ports } = fixturePorts({
+    createBatchRecord: async () => { throw new Error("quota") },
+    client: { cancelBatch: async (name) => { cancelled.push(name) } },
+  })
+  const run = await start(input([1], () => {}), ports)
+  await assert.rejects(run.finished, /could not be saved locally/i)
+  assert.deepEqual(cancelled, ["batches/b1"])
 })
 
 test("job records and uses outputQuality and geminiModel for rendering and batch submission", async () => {
@@ -408,3 +438,22 @@ test("job records and uses outputQuality and geminiModel for rendering and batch
   assert.match(uploadedJsonl, /"imageSize":"4K"/)
 })
 
+test("waits for pollingIntervalMs before first getBatch call after submitting", async () => {
+  const events = []
+  const { ports } = fixturePorts({
+    client: {
+      submitBatch: async () => { events.push("submitBatch"); return "batches/b1" },
+      getBatch: async (name) => { events.push("getBatch"); return { name, state: "completed", responseFile: "files/res1" } },
+      downloadResults: async () =>
+        JSON.stringify({
+          key: "test:page:1",
+          response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("res") } }] } }] },
+        }),
+    },
+    sleep: async (ms) => { events.push(`sleep:${ms}`) },
+  })
+
+  const run = await start(input([1], () => {}), ports)
+  await run.finished
+  assert.deepEqual(events, ["submitBatch", "sleep:3000", "getBatch"])
+})

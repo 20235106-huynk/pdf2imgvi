@@ -59,6 +59,7 @@ test("a newly completed page refreshes saved images before the whole run finishe
     deleteJob: async () => {},
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -137,6 +138,7 @@ test("renders Download PDF button for saved job with completed pages and trigger
     deleteJob: async () => {},
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -236,6 +238,7 @@ test("shows partial export confirmation before exporting job with failed pages",
     deleteJob: async () => {},
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -337,6 +340,7 @@ test("incomplete or submitted job renders Resume button and triggers resumeJob",
     deleteJob: async () => {},
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -437,6 +441,7 @@ test("resuming when API key is missing prompts to open Settings without marking 
     },
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -530,6 +535,7 @@ test("job with failed pages renders Retry Failed Pages button and triggers retry
     deleteJob: async () => {},
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -632,6 +638,7 @@ test("job with failed pages prompts for original PDF when no matching PDF is loa
     deleteJob: async () => {},
     getPageImage: async () => undefined,
     getPagesByJob: async () => [],
+    getBatchesByJob: async () => [],
     saveJobSnapshot: async () => {},
     saveCompletedPage: async () => {},
     translationStartError: () => null,
@@ -683,4 +690,162 @@ test("job with failed pages prompts for original PDF when no matching PDF is loa
     findTextInTree(tree, /select the original PDF/i),
     "Should prompt to select the original PDF when no matching PDF is open",
   )
+})
+
+test("retrying failed pages automatically updates active job box to completed when retry finishes", async () => {
+  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
+  const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
+  const elements = (type, props) => ({ type, props })
+
+  const stateMap = new Map()
+  let stateIndex = 0
+
+  const initialJob = {
+    id: "job-retry-update",
+    pages: [
+      { pageNumber: 1, status: "completed" },
+      { pageNumber: 2, status: "failed", error: "Gemini error" },
+    ],
+    batches: [{ id: "b1", pageNumbers: [1, 2], state: "failed" }],
+    completedPages: 1,
+    failedPages: 1,
+    cancelledPages: 0,
+    status: "failed",
+    stage: "finished",
+    geminiModel: "gemini-3.1-flash-image",
+  }
+
+  let dbStoredJob = {
+    id: "job-retry-update",
+    fileName: "doc.pdf",
+    fileSize: 1024,
+    totalPages: 2,
+    selectedPages: [1, 2],
+    status: "completed_with_errors",
+    completedPages: 1,
+    failedPages: 1,
+    cancelledPages: 0,
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+
+  let dbPages = [
+    { jobId: "job-retry-update", pageNumber: 1, status: "completed", createdAt: 0, updatedAt: 0 },
+    { jobId: "job-retry-update", pageNumber: 2, status: "failed", error: "Gemini error", createdAt: 0, updatedAt: 0 },
+  ]
+
+  let dbBatches = [
+    { id: "b1", jobId: "job-retry-update", batchName: "batches/b1", model: "gemini-3.1-flash-image", pageNumbers: [1, 2], status: "failed", createdAt: 0, updatedAt: 0 },
+  ]
+
+  const context = {
+    useEffect: (fn) => fn(),
+    useRef: (current) => ({ current }),
+    useState: (initial) => {
+      const idx = stateIndex++
+      if (!stateMap.has(idx)) {
+        // Index 0 is `job` state in TranslationPanel
+        const val = idx === 0 ? initialJob : typeof initial === "function" ? initial() : initial
+        stateMap.set(idx, val)
+      }
+      return [
+        stateMap.get(idx),
+        (next) => {
+          const val = typeof next === "function" ? next(stateMap.get(idx)) : next
+          stateMap.set(idx, val)
+        },
+      ]
+    },
+    _jsx: elements,
+    _jsxs: elements,
+    Button: "Button",
+    AbortController: globalThis.AbortController,
+    abortableDelay: async () => {},
+    createGeminiBatchClient: () => ({}),
+    renderPdfPage: () => {},
+    startTranslation: () => ({ finished: Promise.resolve(), cancel: async () => {} }),
+    resumeJob: async () => {},
+    retryFailedPages: async () => {
+      // Simulate successful retry of page 2
+      dbStoredJob = { ...dbStoredJob, status: "completed", completedPages: 2, failedPages: 0 }
+      dbPages = [
+        { jobId: "job-retry-update", pageNumber: 1, status: "completed", createdAt: 0, updatedAt: 0 },
+        { jobId: "job-retry-update", pageNumber: 2, status: "completed", createdAt: 0, updatedAt: 0 },
+      ]
+      dbBatches = [
+        { id: "b1", jobId: "job-retry-update", batchName: "batches/b1", model: "gemini-3.1-flash-image", pageNumbers: [1, 2], status: "succeeded", createdAt: 0, updatedAt: 0 },
+      ]
+    },
+    getApiKey: async () => "key",
+    getSettings: async () => ({ outputFilenameTemplate: "{original}_vi.pdf", pollingIntervalMs: 120000 }),
+    registerBatch: async () => {},
+    unregisterBatch: async () => {},
+    listJobs: async () => [dbStoredJob],
+    createJob: async () => {},
+    getJob: async () => dbStoredJob,
+    deleteJob: async () => {},
+    getPageImage: async () => undefined,
+    getPagesByJob: async () => dbPages,
+    getBatchesByJob: async () => dbBatches,
+    saveJobSnapshot: async () => {},
+    saveCompletedPage: async () => {},
+    translationStartError: () => null,
+    translationProgressLabel: (j) => j.status === "completed" ? "Translation completed" : "Translation finished with errors",
+    exportTranslatedPdf: async () => ({ filename: "doc_vi.pdf", blob: new Blob([]), pageCount: 2 }),
+    downloadPdfBlob: async () => {},
+    chrome: { runtime: { sendMessage: async () => ({ tabId: 12 }) } },
+    window: { addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => {} },
+    setTimeout,
+  }
+
+  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+
+  const render = () => {
+    stateIndex = 0
+    return context.Panel({ pdf: { numPages: 2 }, fileName: "doc.pdf", fileSize: 1024, selectedPages: [1, 2], onRunningChange: () => {} })
+  }
+
+  const findBtnByText = (node, text) => {
+    if (!node) return null
+    if (Array.isArray(node)) return node.map((n) => findBtnByText(n, text)).find(Boolean) ?? null
+    if (typeof node !== "object") return null
+    if (typeof node.props?.children === "string" && node.props.children.includes(text)) return node
+    if (Array.isArray(node.props?.children)) {
+      if (node.props.children.map(String).join("").includes(text)) return node
+    }
+    return findBtnByText(node.props?.children, text)
+  }
+
+  const findTextInTree = (node, pattern) => {
+    if (!node) return false
+    if (Array.isArray(node)) return node.some((n) => findTextInTree(n, pattern))
+    if (typeof node !== "object") return false
+    if (typeof node.props?.children === "string" && pattern.test(node.props.children)) return true
+    if (Array.isArray(node.props?.children)) {
+      if (pattern.test(node.props.children.map(String).join(""))) return true
+    }
+    return findTextInTree(node.props?.children, pattern)
+  }
+
+  let tree = render()
+
+  // Initially shows "Translation finished with errors"
+  assert.ok(findTextInTree(tree, /Translation finished with errors/), "Active box should initially show errors")
+  assert.ok(findTextInTree(tree, /1 failed/), "Should show 1 failed")
+
+  const retryBtn = findBtnByText(tree, "Retry Failed Pages")
+  assert.ok(retryBtn, "Retry Failed Pages button should be rendered")
+
+  // Trigger retry
+  retryBtn.props.onClick()
+  for (let i = 0; i < 10; i++) await new Promise(setImmediate)
+
+  tree = render()
+
+  // Active box must now show "Translation completed"!
+  assert.ok(findTextInTree(tree, /Translation completed/), "Active box should update to Translation completed")
+  assert.ok(findTextInTree(tree, /2 completed · 0 failed/), "Should show 2 completed and 0 failed")
+  assert.equal(stateMap.get(0).status, "completed")
+  assert.equal(stateMap.get(0).failedPages, 0)
 })

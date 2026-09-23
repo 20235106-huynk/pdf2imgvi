@@ -8,18 +8,18 @@ import {
   downloadPdfBlob,
   type ExportProgress,
 } from "@/services/pdf-export.service"
-import { renderPdfPage } from "@/services/pdf-renderer"
+import { pdfDocumentOptions, renderPdfPage } from "@/services/pdf-renderer"
 import { abortableDelay, startTranslation } from "@/services/translation-job"
 import { resumeJob, retryFailedPages } from "@/services/translation-recovery.service"
 import { getApiKey } from "@/storage/api-key.storage"
 import { registerBatch, unregisterBatch } from "@/storage/active-batches.storage"
 import {
-  createBatchRecord, createJob, deleteJob, getJob, getPageImage, getPagesByJob, listJobs,
+  createBatchRecord, createJob, deleteJob, getBatchesByJob, getJob, getPageImage, getPagesByJob, listJobs,
   saveCompletedPage, saveJobSnapshot, updateBatch,
-  type PageMetadata, type StoredJob,
+  type LocalBatchStatus, type PageMetadata, type StoredJob, type StoredPage, type TranslationBatchRecord,
 } from "@/storage/results.storage"
 import { getSettings } from "@/storage/settings.storage"
-import type { TranslationJob } from "@/types/translation"
+import type { BatchStatus, TranslationJob } from "@/types/translation"
 import { translationProgressLabel, translationStartError } from "./translation-start"
 
 interface Props {
@@ -34,6 +34,82 @@ interface Props {
 
 const TERMINAL_BATCH = new Set(["completed", "failed", "cancelled"])
 const FINISHED_JOB = new Set(["completed", "completed_with_errors", "failed"])
+
+function mapBatchState(status: LocalBatchStatus): BatchStatus {
+  switch (status) {
+    case "succeeded":
+      return "completed"
+    case "failed":
+    case "expired":
+      return "failed"
+    case "cancelled":
+      return "cancelled"
+    case "running":
+      return "running"
+    case "submitted":
+    case "pending":
+    default:
+      return "pending"
+  }
+}
+
+function toTranslationJob(
+  stored: StoredJob,
+  pages: StoredPage[],
+  batches: TranslationBatchRecord[],
+): TranslationJob {
+  const hasFailed = pages.some((p) => p.status === "failed")
+  const allTerminal = pages.length > 0 && pages.every((p) => ["completed", "failed", "cancelled"].includes(p.status))
+
+  let status: TranslationJob["status"] = "running"
+  let stage: TranslationJob["stage"] = "waiting"
+
+  if (allTerminal) {
+    stage = "finished"
+    if (hasFailed || stored.failedPages > 0 || stored.status === "completed_with_errors" || stored.status === "failed") {
+      status = "failed"
+    } else if (pages.every((p) => p.status === "cancelled")) {
+      status = "cancelled"
+    } else {
+      status = "completed"
+    }
+  } else {
+    status = "running"
+    stage = stored.status === "preparing" ? "preparing" : stored.status === "submitted" ? "submitted" : "waiting"
+  }
+
+  const effectivePages: StoredPage[] = pages.length > 0
+    ? pages
+    : stored.selectedPages.map((pageNumber) => ({
+        pageNumber,
+        status: "pending" as const,
+        jobId: stored.id,
+        createdAt: stored.createdAt,
+        updatedAt: stored.updatedAt,
+      }))
+
+  return {
+    id: stored.id,
+    pages: effectivePages.map((p) => ({
+      pageNumber: p.pageNumber,
+      status: p.status,
+      error: p.error,
+      batchId: p.batchName,
+    })),
+    batches: batches.map((b) => ({
+      id: b.batchName || b.id,
+      pageNumbers: b.pageNumbers,
+      state: mapBatchState(b.status),
+    })),
+    completedPages: stored.completedPages,
+    failedPages: stored.failedPages,
+    cancelledPages: stored.cancelledPages,
+    status,
+    stage,
+    geminiModel: stored.geminiModel,
+    outputQuality: stored.outputQuality,
+  }
+}
 
 export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRunningChange, onNavigateSettings, loadPdf }: Props) {
   const [job, setJob] = useState<TranslationJob | null>(null)
@@ -86,6 +162,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       setViewed(null)
       setSelectedPage(null)
       void refreshJobs().catch(() => setError("Could not load saved translations."))
+      if (jobRef.current) void syncActiveJob(jobRef.current.id)
     }
     window.addEventListener("pdf2imgvi-results-changed", refresh)
     return () => window.removeEventListener("pdf2imgvi-results-changed", refresh)
@@ -126,10 +203,29 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
   async function defaultLoadPdf(file: File): Promise<PDFDocumentProxy> {
     const url = URL.createObjectURL(file)
     try {
-      const task = getDocument({ url, wasmUrl: new URL("wasm/", window.location.href).href })
+      const task = getDocument(pdfDocumentOptions(url, window.location.href))
       return await task.promise
     } finally {
       URL.revokeObjectURL(url)
+    }
+  }
+
+  async function syncActiveJob(jobId: string) {
+    const shouldSync = jobRef.current?.id === jobId || job?.id === jobId
+    if (!shouldSync) return
+    try {
+      const getBatches = typeof getBatchesByJob === "function" ? getBatchesByJob : async () => []
+      const [stored, pages, batches] = await Promise.all([
+        getJob(jobId),
+        getPagesByJob(jobId),
+        getBatches(jobId),
+      ])
+      if (!stored) return
+      const updated = toTranslationJob(stored, pages, batches)
+      jobRef.current = updated
+      setJob(updated)
+    } catch {
+      // Non-critical background sync
     }
   }
 
@@ -178,8 +274,10 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
         const active = jobRef.current?.status === "running"
         setRunning(active)
         onRunningChange(active)
-      }).catch(() => {
-        setError("Could not save translation progress locally. Please free browser storage and try again.")
+      }).catch((cause: unknown) => {
+        setError(cause instanceof Error && cause.message.startsWith("Gemini batch was submitted")
+          ? cause.message
+          : "Could not save translation progress locally. Please free browser storage and try again.")
         setRunning(false)
         onRunningChange(false)
       })
@@ -245,6 +343,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       setRunning(true)
       onRunningChange(true)
       setRecoveryStatus("Checking Gemini…")
+      void syncActiveJob(jobId)
 
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -261,6 +360,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
           if (viewed?.job.id === jobId) {
             void openSaved(updatedJob)
           }
+          void syncActiveJob(jobId)
         },
       })
     } catch (err: unknown) {
@@ -281,6 +381,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       if (finalJob && viewed?.job.id === jobId) {
         void openSaved(finalJob)
       }
+      await syncActiveJob(jobId)
     }
   }
 
@@ -290,9 +391,10 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
     setPdfFileError("")
     setMissingApiKeyPrompt(false)
 
-    const isMatching = pdf !== null && fileName === jobToRetry.fileName && pdf.numPages === jobToRetry.totalPages
+    const matchesSize = jobToRetry.fileSize === undefined || fileSize === undefined || fileSize === jobToRetry.fileSize
+    const isMatching = pdf !== null && fileName === jobToRetry.fileName && pdf.numPages === jobToRetry.totalPages && matchesSize
     if (isMatching && pdf) {
-      await executeRetry(jobToRetry, pdf)
+      await executeRetry(jobToRetry, pdf, fileSize)
     } else {
       setPdfPromptJob(jobToRetry)
     }
@@ -308,6 +410,11 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       return
     }
 
+    if (pdfPromptJob.fileSize !== undefined && file.size !== pdfPromptJob.fileSize) {
+      setPdfFileError(`Selected file size (${file.size} bytes) does not match original file size (${pdfPromptJob.fileSize} bytes).`)
+      return
+    }
+
     try {
       const loader = loadPdf ?? defaultLoadPdf
       const loadedPdf = await loader(file)
@@ -317,14 +424,14 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       }
       const target = pdfPromptJob
       setPdfPromptJob(null)
-      await executeRetry(target, loadedPdf)
+      await executeRetry(target, loadedPdf, file.size)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not load selected PDF."
       setPdfFileError(msg)
     }
   }
 
-  async function executeRetry(jobToRetry: StoredJob, pdfProxy: PDFDocumentProxy) {
+  async function executeRetry(jobToRetry: StoredJob, pdfProxy: PDFDocumentProxy, retryFileSize?: number) {
     if (starting || running || resumingJobId || retryingJobId) return
     setError("")
     setMissingApiKeyPrompt(false)
@@ -341,6 +448,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       setRunning(true)
       onRunningChange(true)
       setRecoveryStatus("Preparing retry for failed pages…")
+      void syncActiveJob(jobToRetry.id)
 
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -349,6 +457,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
         jobId: jobToRetry.id,
         pdf: pdfProxy,
         fileName: jobToRetry.fileName,
+        fileSize: retryFileSize ?? jobToRetry.fileSize,
         apiKey,
         settings,
         signal: controller.signal,
@@ -358,6 +467,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
           if (viewed?.job.id === jobToRetry.id) {
             void openSaved(updatedJob)
           }
+          void syncActiveJob(jobToRetry.id)
         },
       })
     } catch (err: unknown) {
@@ -378,6 +488,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       if (finalJob && viewed?.job.id === jobToRetry.id) {
         void openSaved(finalJob)
       }
+      await syncActiveJob(jobToRetry.id)
     }
   }
 

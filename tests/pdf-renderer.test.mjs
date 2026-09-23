@@ -3,12 +3,25 @@ import test from "node:test"
 
 import { renderPdfPage } from "../src/services/pdf-renderer.ts"
 
+test("PDF loading reports errors without noisy recoverable font warnings", async () => {
+  const module = await import("../src/services/pdf-renderer.ts")
+  assert.equal(typeof module.pdfDocumentOptions, "function")
+  assert.deepEqual(
+    module.pdfDocumentOptions("blob:document", "chrome-extension://extension/workspace.html"),
+    {
+      url: "blob:document",
+      wasmUrl: "chrome-extension://extension/wasm/",
+      verbosity: 0,
+    },
+  )
+})
+
 function fakePdf(pageWidth = 100, pageHeight = 200) {
   const calls = []
   const page = {
     getViewport: ({ scale }) => ({ width: pageWidth * scale, height: pageHeight * scale }),
-    render: ({ canvas, viewport }) => {
-      calls.push({ canvas, viewport })
+    render: ({ canvas, viewport, transform, background }) => {
+      calls.push({ canvas, viewport, transform, background })
       return { promise: Promise.resolve() }
     },
   }
@@ -24,7 +37,7 @@ function fakePdf(pageWidth = 100, pageHeight = 200) {
   }
 }
 
-test("renders only the requested page to a Blob and releases the canvas", async () => {
+test("renders the requested page at 240 DPI on a centered 9:16 canvas", async () => {
   const originalDocument = globalThis.document
   const canvas = {
     width: 0,
@@ -39,10 +52,15 @@ test("renders only the requested page to a Blob and releases the canvas", async 
     assert.equal(result.pageNumber, 2)
     assert.ok(result.blob instanceof Blob)
     assert.equal(result.blob.type, "image/png")
-    assert.equal(result.width, 200)
-    assert.equal(result.height, 400)
+    assert.equal(result.width, 378)
+    assert.equal(result.height, 672)
     assert.deepEqual(calls.map((call) => call.pageNumber).filter(Boolean), [2])
     assert.equal(calls.length, 2)
+    assert.ok(Math.abs(calls[1].viewport.width - 100 * 240 / 72) < 1e-9)
+    assert.ok(Math.abs(calls[1].viewport.height - 200 * 240 / 72) < 1e-9)
+    assert.ok(Math.abs(calls[1].transform[4] - (378 - 100 * 240 / 72) / 2) < 1e-9)
+    assert.ok(Math.abs(calls[1].transform[5] - (672 - 200 * 240 / 72) / 2) < 1e-9)
+    assert.equal(calls[1].background, "white")
     assert.equal(canvas.width, 0)
     assert.equal(canvas.height, 0)
   } finally {

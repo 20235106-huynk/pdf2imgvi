@@ -68,6 +68,8 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
   const finalized = new Set<string>()
   let persistence = Promise.resolve()
   let persistenceError: unknown = null
+  let fatalSubmissionError: Error | null = null
+  const batchRecordIds = new Map<string, string>()
 
   function emit(changedPages: readonly number[] = []): void {
     job.completedPages = job.pages.filter((page) => page.status === "completed").length
@@ -144,7 +146,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
     }
     if (ports.updateBatch) {
       const localStatus = status.state === "completed" ? "succeeded" : status.state === "cancelled" ? "cancelled" : "failed"
-      await ports.updateBatch(status.name, { status: localStatus }).catch(() => {})
+      await ports.updateBatch(batchRecordIds.get(status.name) ?? status.name, { status: localStatus }).catch(() => {})
     }
     await ports.unregisterBatch(input.tabId, status.name).catch(() => {})
   }
@@ -176,14 +178,17 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         break
       }
       if (!uploads.length) continue
+      let submittedName: string | null = null
       try {
         const jsonl = buildBatchJsonl(job.id, uploads, input.settings.sourceLanguage, input.settings.targetLanguage, job.outputQuality ?? input.settings.quality)
         const file = await ports.client.uploadFile(jsonl, `batch-${job.batches.length + 1}.jsonl`, aborter.signal)
         const name = await ports.client.submitBatch(job.geminiModel ?? input.settings.geminiModel, file.name, aborter.signal)
+        submittedName = name
         if (ports.createBatchRecord) {
           const now = Date.now()
+          const id = crypto.randomUUID()
           await ports.createBatchRecord({
-            id: crypto.randomUUID(),
+            id,
             jobId: job.id,
             batchName: name,
             model: job.geminiModel ?? input.settings.geminiModel,
@@ -192,6 +197,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
             createdAt: now,
             updatedAt: now,
           })
+          batchRecordIds.set(name, id)
         }
         job.batches.push({ id: name, pageNumbers: uploads.map((upload) => upload.pageNumber), state: "pending" })
         for (const upload of uploads) page(upload.pageNumber).batchId = name
@@ -199,6 +205,18 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
         emit(uploads.map((upload) => upload.pageNumber))
         await ports.registerBatch(input.tabId, name).catch(() => {})
       } catch {
+        if (submittedName) {
+          let cancelRequested = false
+          try {
+            await ports.client.cancelBatch(submittedName)
+            cancelRequested = true
+          } catch { /* Cancellation may fail after remote submission. */ }
+          fatalSubmissionError = new Error(cancelRequested
+            ? "Gemini batch was submitted but could not be saved locally. Cancellation was requested."
+            : "Gemini batch was submitted but could not be saved locally. Cancellation is unconfirmed; it may still be processing.")
+          for (const upload of uploads) mark(upload.pageNumber, "failed", fatalSubmissionError.message)
+          throw fatalSubmissionError
+        }
         for (const upload of uploads) mark(upload.pageNumber, stopping ? "cancelled" : "failed", stopping ? undefined : "Could not submit Gemini batch")
       }
     }
@@ -215,6 +233,11 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
       emit()
     }
     while (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
+      try {
+        await ports.sleep(input.settings.pollingIntervalMs, stopping ? undefined : aborter.signal)
+      } catch (error) {
+        if (!stopping) throw error
+      }
       for (const batch of job.batches) {
         if (TERMINAL.has(batch.state)) continue
         try {
@@ -231,13 +254,6 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
           }
         } catch { /* Keep polling; a status request can fail temporarily. */ }
       }
-      if (job.batches.some((batch) => !TERMINAL.has(batch.state))) {
-        try {
-          await ports.sleep(input.settings.pollingIntervalMs, stopping ? undefined : aborter.signal)
-        } catch (error) {
-          if (!stopping) throw error
-        }
-      }
     }
     emit()
   }).catch(() => {
@@ -249,6 +265,7 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
   }).then(async () => {
     await persistence
     if (persistenceError) throw persistenceError
+    if (fatalSubmissionError) throw fatalSubmissionError
   })
 
   function cancel(): Promise<void> {

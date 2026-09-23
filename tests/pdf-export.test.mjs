@@ -129,6 +129,36 @@ test("sorts out-of-order pages and creates PDF with matching dimensions", async 
   assert.equal(progressEvents[3].processedPages, 3)
 })
 
+test("exports a translated WebP page by converting it to PNG", async () => {
+  const previousBitmap = globalThis.createImageBitmap
+  const previousDocument = globalThis.document
+  globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} })
+  globalThis.document = {
+    createElement: () => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({ drawImage() {} }),
+      toBlob: (callback) => callback(new Blob([ONE_PIXEL_PNG], { type: "image/png" })),
+    }),
+  }
+  try {
+    const result = await exportTranslatedPdf({
+      jobId: "webp-job",
+      deps: {
+        getJob: async () => ({ id: "webp-job", fileName: "doc.pdf" }),
+        getPagesByJob: async () => [{ jobId: "webp-job", pageNumber: 1, status: "completed" }],
+        getPageImage: async () => new Blob([new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80])], { type: "image/webp" }),
+        getSettings: async () => ({ outputFilenameTemplate: "{original}_vi.pdf" }),
+      },
+    })
+    const exported = await PDFDocument.load(await result.blob.arrayBuffer())
+    assert.equal(exported.getPageCount(), 1)
+  } finally {
+    globalThis.createImageBitmap = previousBitmap
+    globalThis.document = previousDocument
+  }
+})
+
 test("downloadPdfBlob function is callable", async () => {
   assert.equal(typeof downloadPdfBlob, "function")
 })

@@ -24,10 +24,13 @@ export function buildBatchJsonl(
         { file_data: { mime_type: mimeType, file_uri: fileUri } },
       ] }],
       generation_config: {
-        responseModalities: ["IMAGE"],
+        responseModalities: ["TEXT","IMAGE"],
         imageConfig: {
-          imageSize,
+          aspectRatio: "9:16",
+          imageSize: imageSize,
         },
+        "temperature": 0.9,
+        "topP": 0.85,
       },
     },
   })).join("\n")
