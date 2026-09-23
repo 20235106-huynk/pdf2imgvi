@@ -10,7 +10,7 @@ test("manifest exposes only the requested MV3 capabilities", async () => {
   assert.equal(manifest.manifest_version, 3)
   assert.equal(manifest.name, "pdf2imgvi")
   assert.deepEqual(manifest.permissions, ["storage", "downloads"])
-  assert.equal("host_permissions" in manifest, false)
+  assert.deepEqual(manifest.host_permissions, ["https://generativelanguage.googleapis.com/*"])
   assert.equal(JSON.stringify(manifest).includes("<all_urls>"), false)
   assert.equal(manifest.action.default_popup, "popup.html")
   assert.equal(manifest.background.service_worker, "service-worker.js")

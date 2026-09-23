@@ -2,13 +2,12 @@ export type ApiKeyStorageMode = "local" | "session"
 export type OutputQuality = "standard" | "high" | "very-high"
 
 export interface AppSettings {
-  modelId: string
+  geminiModel: string
   sourceLanguage: string
   targetLanguage: string
   quality: OutputQuality
-  concurrency: number
-  autoRetry: boolean
-  maxRetries: number
+  batchSize: number
+  pollingIntervalMs: number
   outputFilenameTemplate: string
   apiKeyStorageMode: ApiKeyStorageMode
 }
@@ -37,18 +36,18 @@ export const QUALITY_OPTIONS = [
   { value: "very-high", label: "Very High" },
 ] as const
 
-export const MIN_CONCURRENCY = 1
-export const MAX_CONCURRENCY = 30
-export const DEFAULT_CONCURRENCY = 15
+export const MIN_BATCH_SIZE = 1
+export const MAX_BATCH_SIZE = 20
+export const MIN_POLLING_INTERVAL_MS = 3000
+export const MAX_POLLING_INTERVAL_MS = 60000
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  modelId: MODEL_OPTIONS[0].value,
+  geminiModel: MODEL_OPTIONS[0].value,
   sourceLanguage: SOURCE_LANGUAGE_OPTIONS[0].value,
   targetLanguage: TARGET_LANGUAGE_OPTIONS[0].value,
   quality: QUALITY_OPTIONS[0].value,
-  concurrency: DEFAULT_CONCURRENCY,
-  autoRetry: true,
-  maxRetries: 3,
+  batchSize: 5,
+  pollingIntervalMs: 3000,
   outputFilenameTemplate: "{original}_vi.pdf",
   apiKeyStorageMode: "local",
 }
@@ -64,10 +63,11 @@ export function normalizeSettings(value: unknown): AppSettings {
   const input: Record<string, unknown> =
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
 
+  const model = input.geminiModel ?? input.modelId
   return {
-    modelId: isOption(input.modelId, MODEL_OPTIONS)
-      ? input.modelId
-      : DEFAULT_SETTINGS.modelId,
+    geminiModel: isOption(model, MODEL_OPTIONS)
+      ? model
+      : DEFAULT_SETTINGS.geminiModel,
     sourceLanguage: isOption(input.sourceLanguage, SOURCE_LANGUAGE_OPTIONS)
       ? input.sourceLanguage
       : DEFAULT_SETTINGS.sourceLanguage,
@@ -77,18 +77,14 @@ export function normalizeSettings(value: unknown): AppSettings {
     quality: isOption(input.quality, QUALITY_OPTIONS)
       ? input.quality
       : DEFAULT_SETTINGS.quality,
-    concurrency:
-      typeof input.concurrency === "number" && Number.isFinite(input.concurrency)
-        ? Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, Math.trunc(input.concurrency)))
-        : DEFAULT_SETTINGS.concurrency,
-    autoRetry:
-      typeof input.autoRetry === "boolean" ? input.autoRetry : DEFAULT_SETTINGS.autoRetry,
-    maxRetries:
-      typeof input.maxRetries === "number" &&
-      Number.isSafeInteger(input.maxRetries) &&
-      input.maxRetries >= 0
-        ? input.maxRetries
-        : DEFAULT_SETTINGS.maxRetries,
+    batchSize:
+      typeof input.batchSize === "number" && Number.isSafeInteger(input.batchSize)
+        ? Math.max(MIN_BATCH_SIZE, Math.min(MAX_BATCH_SIZE, input.batchSize))
+        : DEFAULT_SETTINGS.batchSize,
+    pollingIntervalMs:
+      typeof input.pollingIntervalMs === "number" && Number.isSafeInteger(input.pollingIntervalMs)
+        ? Math.max(MIN_POLLING_INTERVAL_MS, Math.min(MAX_POLLING_INTERVAL_MS, input.pollingIntervalMs))
+        : DEFAULT_SETTINGS.pollingIntervalMs,
     outputFilenameTemplate:
       typeof input.outputFilenameTemplate === "string" && input.outputFilenameTemplate.trim()
         ? input.outputFilenameTemplate.trim()

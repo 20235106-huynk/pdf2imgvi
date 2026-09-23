@@ -5,8 +5,10 @@ import { getApiKey, saveApiKey } from "@/storage/api-key.storage"
 import { getSettings, saveSettings } from "@/storage/settings.storage"
 import {
   DEFAULT_SETTINGS,
-  MAX_CONCURRENCY,
-  MIN_CONCURRENCY,
+  MAX_BATCH_SIZE,
+  MAX_POLLING_INTERVAL_MS,
+  MIN_BATCH_SIZE,
+  MIN_POLLING_INTERVAL_MS,
   MODEL_OPTIONS,
   QUALITY_OPTIONS,
   SOURCE_LANGUAGE_OPTIONS,
@@ -91,14 +93,14 @@ export function SettingsPage() {
       <form onSubmit={save} className="mt-8 space-y-8" aria-busy={saving}>
         <fieldset disabled={saving} className="min-w-0 space-y-8 border-0 p-0">
         <section className="space-y-5 border-b pb-8" aria-labelledby="engine-heading">
-          <h2 id="engine-heading" className="text-lg font-semibold">Translate Engine</h2>
+          <h2 id="engine-heading" className="text-lg font-semibold">Gemini</h2>
           <label className="block text-sm font-medium" htmlFor="model">
-            Model
+            Gemini Model
             <select
               id="model"
               className={controlClass}
-              value={draft.modelId}
-              onChange={(event) => update("modelId", event.target.value)}
+              value={draft.geminiModel}
+              onChange={(event) => update("geminiModel", event.target.value)}
             >
               {MODEL_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -197,56 +199,20 @@ export function SettingsPage() {
           ))}
         </fieldset>
 
-        <section className="border-b pb-8" aria-labelledby="performance-heading">
-          <h2 id="performance-heading" className="text-lg font-semibold">Performance Settings</h2>
-          <p className="mt-4 text-sm font-medium">Simultaneous Translations</p>
-          <div className="mt-2 flex items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              aria-label="Decrease simultaneous translations"
-              disabled={draft.concurrency <= MIN_CONCURRENCY}
-              onClick={() => update("concurrency", draft.concurrency - 1)}
-            >
-              −
-            </Button>
-            <output className="min-w-8 text-center" aria-live="polite">{draft.concurrency}</output>
-            <Button
-              type="button"
-              variant="outline"
-              aria-label="Increase simultaneous translations"
-              disabled={draft.concurrency >= MAX_CONCURRENCY}
-              onClick={() => update("concurrency", draft.concurrency + 1)}
-            >
-              +
-            </Button>
-          </div>
-        </section>
-
-        <section className="space-y-4 border-b pb-8" aria-labelledby="retry-heading">
-          <h2 id="retry-heading" className="text-lg font-semibold">Retry Settings</h2>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={draft.autoRetry}
-              onChange={(event) => update("autoRetry", event.target.checked)}
-            />
-            Automatically retry failed pages
+        <section className="space-y-4 border-b pb-8" aria-labelledby="batch-heading">
+          <h2 id="batch-heading" className="text-lg font-semibold">Batch Settings</h2>
+          <label className="block text-sm font-medium" htmlFor="batch-size">
+            Pages per batch
+            <input id="batch-size" className={controlClass} type="number"
+              min={MIN_BATCH_SIZE} max={MAX_BATCH_SIZE} step={1} value={draft.batchSize}
+              onChange={(event) => update("batchSize", Number(event.target.value))} />
           </label>
-          <label className="block text-sm font-medium" htmlFor="max-retries">
-            Maximum retries
-            <input
-              id="max-retries"
-              className={controlClass}
-              type="number"
-              min={0}
-              step={1}
-              value={draft.maxRetries}
-              disabled={!draft.autoRetry}
-              onChange={(event) =>
-                update("maxRetries", Math.max(0, Math.trunc(Number(event.target.value))))
-              }
-            />
+          <label className="block text-sm font-medium" htmlFor="polling-interval">
+            Status check interval (seconds)
+            <input id="polling-interval" className={controlClass} type="number"
+              min={MIN_POLLING_INTERVAL_MS / 1000} max={MAX_POLLING_INTERVAL_MS / 1000}
+              step={1} value={draft.pollingIntervalMs / 1000}
+              onChange={(event) => update("pollingIntervalMs", Number(event.target.value) * 1000)} />
           </label>
         </section>
 
@@ -267,14 +233,13 @@ export function SettingsPage() {
         <section className="space-y-3 border-b pb-8" aria-labelledby="storage-heading">
           <h2 id="storage-heading" className="text-lg font-semibold">Local Storage</h2>
           <p className="text-sm text-muted-foreground">
-            Translation jobs and translated pages are stored locally on this device.
+            Completed page images are stored locally on this device. Active jobs are not resumed after closing the workspace.
           </p>
           <Button
             type="button"
             variant="outline"
             onClick={() => {
-              // TODO: clear translation cache when a cache repository exists.
-              setFeedback("Translation cache is not available yet.")
+              setFeedback("Saved results can be removed from the Translator view.")
             }}
           >
             Clear Translation Cache
@@ -283,28 +248,10 @@ export function SettingsPage() {
 
         <section className="space-y-2 border-b pb-8 text-sm" aria-labelledby="privacy-heading">
           <h2 id="privacy-heading" className="text-lg font-semibold">Privacy</h2>
-          <p>Your API key is stored locally.</p>
-          <p>PDF files are processed on your device.</p>
-          <p>Pages are sent directly to your selected AI provider for translation.</p>
-          <p>No files are uploaded to our servers.</p>
+          <p>Your API key uses the storage mode selected above.</p>
+          <p>The source PDF stays on your device; selected pages are rendered and uploaded directly to Gemini.</p>
+          <p>Completed images are stored locally in IndexedDB. No files are uploaded to our servers.</p>
         </section>
-
-        <details className="border-b pb-8">
-          <summary className="cursor-pointer text-lg font-semibold">Advanced Settings</summary>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {[
-              "Model",
-              "Custom Translation Prompt",
-              "Render Resolution",
-              "Request Timeout",
-            ].map((label) => (
-              <label key={label} className="text-sm font-medium">
-                {label}
-                <input className={controlClass} placeholder="Coming later" disabled />
-              </label>
-            ))}
-          </div>
-        </details>
         </fieldset>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pb-8">

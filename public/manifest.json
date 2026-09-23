@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Translate PDFs to Vietnamese.",
   "permissions": ["storage", "downloads"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
   "action": {
     "default_title": "pdf2imgvi",
     "default_popup": "popup.html",

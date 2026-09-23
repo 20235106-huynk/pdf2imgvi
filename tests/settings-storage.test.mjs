@@ -47,11 +47,11 @@ test("settings load defaults, normalize before saving, and reset", async () => {
   assert.deepEqual(await getSettings(), DEFAULT_SETTINGS)
   await saveSettings({
     ...DEFAULT_SETTINGS,
-    concurrency: 99,
+    batchSize: 99,
     sourceLanguage: "ja",
     apiKey: "must-not-persist",
   })
-  assert.equal((await getSettings()).concurrency, 30)
+  assert.equal((await getSettings()).batchSize, 20)
   assert.equal((await getSettings()).sourceLanguage, "ja")
   assert.equal("apiKey" in local.values.get("appSettings"), false)
   assert.equal(session.values.size, 0)
@@ -63,7 +63,7 @@ test("settings load defaults, normalize before saving, and reset", async () => {
 
 test("corrupt saved settings are normalized on load", async () => {
   const { local } = installStorage()
-  local.values.set("appSettings", { quality: "unknown", maxRetries: -9 })
+  local.values.set("appSettings", { quality: "unknown", batchSize: Number.NaN })
 
   assert.deepEqual(await getSettings(), DEFAULT_SETTINGS)
 })
