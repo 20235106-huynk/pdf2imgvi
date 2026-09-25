@@ -350,23 +350,28 @@ export async function retryFailedPages(options: RetryOptions): Promise<void> {
   try {
     for (const chunk of batchChunks) {
       if (options.signal?.aborted) return
-      const uploads: { pageNumber: number; fileUri: string; mimeType: string }[] = []
-
-      for (const pageNumber of chunk) {
-        if (options.signal?.aborted) return
+      const results = await Promise.all(chunk.map(async (pageNumber) => {
+        if (options.signal?.aborted) return null
         await updatePageRecord(job.id, pageNumber, { status: "rendering" })
         try {
           const rendered = await renderPage(options.pdf as PDFDocumentProxy, pageNumber, quality)
+          if (options.signal?.aborted) return null
           const file = await client.uploadFile(rendered.blob, `page-${pageNumber}.png`, options.signal)
-          uploads.push({ pageNumber, fileUri: file.uri, mimeType: rendered.blob.type })
+          if (options.signal?.aborted) return null
           await updatePageRecord(job.id, pageNumber, { status: "queued" })
+          return { pageNumber, fileUri: file.uri, mimeType: rendered.blob.type }
         } catch {
+          if (options.signal?.aborted) return null
           await updatePageRecord(job.id, pageNumber, {
             status: "failed",
             error: "Could not render or upload page for retry",
           })
+          return null
         }
-      }
+      }))
+      const uploads = results.filter((result) => result !== null)
+
+      if (options.signal?.aborted) return
 
       if (uploads.length === 0) continue
 

@@ -3,6 +3,40 @@ import assert from "node:assert/strict"
 
 import { retryFailedPages } from "../src/services/translation-recovery.service.ts"
 
+test("retry starts every upload in the configured batch while the first is pending", async () => {
+  const controller = new AbortController()
+  let releaseFirst
+  const held = new Promise((resolve) => { releaseFirst = resolve })
+  let fourthStarted
+  const started = new Promise((resolve) => { fourthStarted = resolve })
+  const pages = [1, 2, 3, 4].map((pageNumber) => ({ jobId: "j-concurrent", pageNumber, status: "failed" }))
+  const retry = retryFailedPages({
+    jobId: "j-concurrent", pdf: { numPages: 4 }, fileName: "paper.pdf", apiKey: "key",
+    settings: { quality: "standard", geminiModel: "gemini-3.1-flash-image", sourceLanguage: "en", targetLanguage: "vi", batchSize: 4, pollingIntervalMs: 10 },
+    signal: controller.signal,
+    deps: {
+      getJob: async () => ({ id: "j-concurrent", fileName: "paper.pdf", totalPages: 4 }),
+      getPagesByJob: async () => pages,
+      getBatchesByJob: async () => [],
+      updatePageRecord: async (_jobId, pageNumber, patch) => Object.assign(pages[pageNumber - 1], patch),
+      updateJobRecord: async () => {},
+      renderPage: async (_pdf, pageNumber) => ({ pageNumber, blob: new Blob([String(pageNumber)], { type: "image/png" }) }),
+      client: { uploadFile: async (_blob, name) => {
+        if (name === "page-1.png") await held
+        if (name === "page-4.png") { fourthStarted(); controller.abort() }
+        return { name: `files/${name}`, uri: `https://gemini/${name}` }
+      } },
+    },
+  })
+  try {
+    await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error("Fourth retry upload did not start")), 100))])
+  } finally {
+    controller.abort()
+    releaseFirst()
+  }
+  await retry
+})
+
 test("retryFailedPages throws if PDF fileName does not match", async () => {
   const storedJob = {
     id: "j-mismatch",

@@ -64,16 +64,14 @@ function fixturePorts(overrides = {}) {
   return { events, saved, groups, snapshots, createdJobs, ports: { ...ports, ...overrides, client: { ...ports.client, ...overrides.client } } }
 }
 
-test("renders/uploads one page at a time, submits chunks, and maps reversed results", async () => {
+test("uploads pages concurrently, submits chunks, and maps reversed results", async () => {
   const snapshots = []
   const { events, saved, groups, ports } = fixturePorts()
   const run = await start(input([1, 2, 3, 4, 5, 6], (job) => snapshots.push(job)), ports)
   await run.finished
 
-  assert.deepEqual(events, [
-    "render:1", "upload:1", "render:2", "upload:2", "render:3", "upload:3",
-    "render:4", "upload:4", "render:5", "upload:5", "render:6", "upload:6",
-  ])
+  assert.deepEqual(events.filter((event) => event.startsWith("upload:")),
+    ["upload:1", "upload:2", "upload:3", "upload:4", "upload:5", "upload:6"])
   assert.deepEqual(groups.map((group) => group.map((row) => Number(row.key.split(":").at(-1)))), [[1, 2, 3, 4, 5], [6]])
   assert.deepEqual(saved.map((row) => row.pageNumber), [1, 2, 3, 4, 5, 6])
   assert.equal(snapshots.at(-1).completedPages, 6)
@@ -83,6 +81,31 @@ test("renders/uploads one page at a time, submits chunks, and maps reversed resu
   assert.ok(snapshots.some((job) => job.stage === "waiting"))
   assert.equal(snapshots.at(-1).stage, "finished")
   assert.equal(snapshots.at(-1).batches[0].state, "completed")
+})
+
+test("starts every upload in the configured batch before the first finishes", async () => {
+  let releaseFirst
+  const held = new Promise((resolve) => { releaseFirst = resolve })
+  let fourthStarted
+  const started = new Promise((resolve) => { fourthStarted = resolve })
+  const { ports } = fixturePorts({
+    client: {
+      uploadFile: async (blob) => {
+        if (blob.type === "application/jsonl") return { name: "files/input", uri: "https://gemini/input" }
+        const page = Number((await blob.text()).slice(5))
+        if (page === 1) await held
+        if (page === 4) fourthStarted()
+        return { name: `files/page${page}`, uri: `https://gemini/page${page}` }
+      },
+    },
+  })
+  const run = await start(input([1, 2, 3, 4], () => {}, 4), ports)
+  try {
+    await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error("Fourth upload did not start")), 100))])
+  } finally {
+    releaseFirst()
+  }
+  await run.finished
 })
 
 test("isolates keyed page failures and a failed batch while preserving completed images", async () => {

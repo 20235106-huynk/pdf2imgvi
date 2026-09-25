@@ -158,21 +158,22 @@ export function startTranslation(input: TranslationInput, ports: TranslationPort
       await persistence
       if (persistenceError) throw persistenceError
       if (stopping) break
-      const uploads: { pageNumber: number; fileUri: string; mimeType: string }[] = []
-      for (const pageNumber of pageNumbers) {
-        if (stopping) break
+      const results = await Promise.all(pageNumbers.map(async (pageNumber) => {
+        if (stopping) return null
         mark(pageNumber, "rendering")
         try {
           const rendered = await ports.renderPage(input.pdf, pageNumber, job.outputQuality ?? input.settings.quality)
-          if (stopping) { mark(pageNumber, "cancelled"); break }
+          if (stopping) { mark(pageNumber, "cancelled"); return null }
           const file = await ports.client.uploadFile(rendered.blob, `page-${pageNumber}.png`, aborter.signal)
-          if (stopping) { mark(pageNumber, "cancelled"); break }
-          uploads.push({ pageNumber, fileUri: file.uri, mimeType: rendered.blob.type })
+          if (stopping) { mark(pageNumber, "cancelled"); return null }
           mark(pageNumber, "queued")
+          return { pageNumber, fileUri: file.uri, mimeType: rendered.blob.type }
         } catch {
           mark(pageNumber, stopping ? "cancelled" : "failed", stopping ? undefined : "Could not render or upload page")
+          return null
         }
-      }
+      }))
+      const uploads = results.filter((result) => result !== null)
       if (stopping) {
         for (const upload of uploads) mark(upload.pageNumber, "cancelled")
         break
