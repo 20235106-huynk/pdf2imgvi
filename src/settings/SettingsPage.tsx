@@ -250,7 +250,7 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
                     className="accent-primary"
                   />
                   <div>
-                    <p className="font-semibold text-xs">{t("sessionStorage")}</p>
+                    <p className="font-semibold text-xs">Session only</p>
                     <p className="text-[11px] text-muted-foreground">Cleared on browser exit</p>
                   </div>
                 </label>
@@ -492,7 +492,7 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
                 className="gap-1.5 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                {t("clearCache")}
+                Clear Translation Cache
               </Button>
             </div>
           </section>
@@ -525,12 +525,12 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
             {saving ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{t("saving")}</span>
+                <span>Saving…</span>
               </>
             ) : (
               <>
                 <Save className="h-4 w-4" />
-                <span>{t("saveSettings")}</span>
+                <span>Save Changes</span>
               </>
             )}
           </Button>

@@ -8,7 +8,6 @@ import {
   Sun,
   Moon,
   Languages,
-  SlidersHorizontal,
   Download,
   Loader2,
 } from "lucide-react"
@@ -25,7 +24,7 @@ type OpenWorkspaceMessage = {
 }
 
 export function Popup() {
-  const { lang, toggleLanguage, t } = useI18n()
+  const { toggleLanguage, t } = useI18n()
   const { isDark, toggleTheme } = useTheme()
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null)
   const [recentJobs, setRecentJobs] = useState<StoredJob[]>([])
@@ -134,7 +133,7 @@ export function Popup() {
               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
               <span>{t("noApiKey")}</span>
             </div>
-            <span className="text-[10px] underline">{t("openSettings")}</span>
+            <span className="text-[10px] underline">Configure key</span>
           </div>
         )}
       </div>
@@ -167,7 +166,7 @@ export function Popup() {
       {/* Main Launch Action */}
       <div className="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
         <div>
-          <h2 className="font-bold text-sm tracking-tight">{t("openStudio")}</h2>
+          <h2 className="font-bold text-sm tracking-tight">Open Translator</h2>
           <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
             {t("openStudioDesc")}
           </p>
@@ -180,7 +179,7 @@ export function Popup() {
           className="w-full gap-2 h-10 font-semibold shadow-xs cursor-pointer"
         >
           <ExternalLink className="h-4 w-4" />
-          <span>{t("openStudio")}</span>
+          <span>Open Translator</span>
         </Button>
       </div>
 
