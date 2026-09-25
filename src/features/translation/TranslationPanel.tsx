@@ -73,11 +73,16 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
     setSavedJobs(await listJobs())
   }
 
-  async function openSaved(saved: StoredJob) {
+  async function openSaved(saved: StoredJob, keepPage?: number | null) {
     try {
       const pages = await getPagesByJob(saved.id)
       setViewed({ job: saved, pages })
-      setSelectedPage(pages.find((page) => page.status === "completed")?.pageNumber ?? null)
+      setSelectedPage((previous) => {
+        const preferred = keepPage ?? (viewed?.job.id === saved.id ? previous : null)
+        return preferred && pages.some((page) => page.pageNumber === preferred)
+          ? preferred
+          : pages.find((page) => page.status === "completed")?.pageNumber ?? pages[0]?.pageNumber ?? null
+      })
       setError("")
     } catch {
       setError("Could not load saved translation. Please reload the workspace.")
@@ -444,15 +449,12 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
 
   async function markPageForRegeneration(pageNumber: number) {
     if (!viewed || running || exportingJobId) return
+    const page = viewed.pages.find((item) => item.pageNumber === pageNumber)
+    if (!page || page.status !== "completed") return
     setError("")
     try {
-      await updatePageRecord(viewed.job.id, pageNumber, {
-        status: "failed",
-        error: "Marked for regeneration by user",
-      })
-      const updatedJob = await recalculateJobProgress(viewed.job.id)
-      await Promise.all([refreshJobs(), openSaved(updatedJob)])
-      await syncActiveJob(viewed.job.id)
+      await updatePageRecord(viewed.job.id, pageNumber, { retryRequested: !page.retryRequested })
+      await openSaved(viewed.job, pageNumber)
     } catch {
       setError("Could not mark this page for regeneration.")
     }
@@ -521,7 +523,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
             {isResuming ? "Resuming…" : "Resume"}
           </Button>
         )}
-        {targetJob.failedPages > 0 && !running && (
+        {(targetJob.failedPages > 0 || (viewed?.job.id === targetJob.id && viewed.pages.some((page) => page.retryRequested))) && !running && (
           <Button
             type="button"
             variant="outline"
@@ -531,7 +533,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
               if (stored) void handleRetry(stored)
             }}
           >
-            {isRetrying ? "Retrying…" : "Retry Failed Pages"}
+            {isRetrying ? "Retrying…" : viewed?.job.id === targetJob.id && viewed.pages.some((page) => page.retryRequested) ? "Retry marked and failed pages" : "Retry Failed Pages"}
           </Button>
         )}
         {options.showView && "fileName" in targetJob && (

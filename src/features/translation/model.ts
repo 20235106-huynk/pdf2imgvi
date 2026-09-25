@@ -67,6 +67,7 @@ export interface StoredPage {
   jobId: string
   pageNumber: number
   status: PageStatus
+  retryRequested?: boolean
   batchName?: string
   width?: number
   height?: number
@@ -113,4 +114,3 @@ export function jobStatus(job: {
   if ((job.batches && job.batches.length > 0) || job.pages.some((page) => page.status === "queued")) return "submitted"
   return "preparing"
 }
-

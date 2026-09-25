@@ -26,7 +26,7 @@ test("builds Gemini image requests with stable page keys and file URIs", async (
   assert.equal(rows[0].request.contents[0].parts[1].file_data.file_uri, "https://files.example/5")
   assert.equal(rows[0].request.contents[0].parts[1].file_data.mime_type, "image/png")
   assert.deepEqual(rows[0].request.generation_config.responseModalities, ["TEXT", "IMAGE"])
-  assert.deepEqual(rows[0].request.generation_config.imageConfig, { imageSize: "1K" })
+  assert.deepEqual(rows[0].request.generation_config.imageConfig, { imageSize: "1K", aspectRatio: "2:3" })
   assert.match(rows[0].request.contents[0].parts[0].text, /English/)
   assert.match(rows[0].request.contents[0].parts[0].text, /Vietnamese/)
 })
@@ -61,6 +61,14 @@ test("maps reversed image results by key and isolates keyed failures", async () 
   assert.equal(await results[2].image.text(), "three")
   assert.equal(results[2].image.type, "image/png")
   assert.ok(results[3].error)
+})
+
+test("keeps Gemini's per-page error message for diagnosis", async () => {
+  const { parseBatchResults } = await moduleUnderTest()
+  const row = JSON.stringify({ key: "job-7:page:1", error: { code: 3, status: "INVALID_ARGUMENT", message: "Unsupported data type encountered." } })
+  const [result] = await parseBatchResults(row, "job-7", [1])
+  assert.match(result.error, /Unsupported data type encountered/)
+  assert.match(result.error, /INVALID_ARGUMENT/)
 })
 
 test("duplicate, unknown, malformed keys and bad rows cannot misattribute images", async () => {

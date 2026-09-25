@@ -44,7 +44,7 @@ export function createGeminiBatchClient(
 
   return {
     async uploadFile(blob: Blob, displayName: string, signal?: AbortSignal): Promise<{ name: string; uri: string }> {
-      const file = await sdk.files.upload({ file: blob, config: {
+      const file = await sdk.files.upload({ file: new File([blob], displayName, { type: blob.type }), config: {
         displayName, mimeType: blob.type, ...(signal ? { abortSignal: signal } : {}),
       } })
       if (typeof file.name !== "string" || typeof file.uri !== "string") {

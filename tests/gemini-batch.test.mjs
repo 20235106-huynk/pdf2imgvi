@@ -41,7 +41,10 @@ test("uses the Gemini SDK for upload, submit, status, and cancellation", async (
   await client.cancelBatch("batches/job1")
 
   assert.deepEqual(calls.map(([action]) => action), ["upload", "create", "get", "download", "cancel"])
-  assert.equal(calls[0][1].file, blob)
+  assert.ok(calls[0][1].file instanceof File)
+  assert.equal(calls[0][1].file.name, "page-1.png")
+  assert.equal(calls[0][1].file.type, "image/png")
+  assert.equal(await calls[0][1].file.text(), await blob.text())
   assert.equal(calls[0][1].config.mimeType, "image/png")
   assert.deepEqual(calls[1][1], {
     model: "gemini-3.1-flash-image", src: "files/input", config: { displayName: "pdf2imgvi-translation" },

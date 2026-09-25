@@ -1,4 +1,8 @@
 import { PDFDocument } from "pdf-lib"
+import { cropImageToA4 } from "./a4-image.ts"
+
+const A4_WIDTH = 595.28
+const A4_HEIGHT = 841.89
 
 import {
   getJob as defaultGetJob,
@@ -22,7 +26,6 @@ export interface ExportPdfOptions {
     getPagesByJob?: typeof defaultGetPagesByJob
     getPageImage?: typeof defaultGetPageImage
     getSettings?: typeof defaultGetSettings
-    convertWebpToPng?: (blob: Blob) => Promise<Uint8Array>
   }
 }
 
@@ -36,34 +39,6 @@ function formatFilename(template: string, original: string): string {
   const stem = original.replace(/\.pdf$/i, "").trim()
   const name = (template || "{original}_vi.pdf").replaceAll("{original}", stem)
   return name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`
-}
-
-async function webpToPng(blob: Blob): Promise<Uint8Array> {
-  const bitmap = await createImageBitmap(blob)
-  try {
-    if (typeof OffscreenCanvas !== "undefined") {
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
-      const context = canvas.getContext("2d")
-      if (!context) throw new Error("Could not convert WebP image for PDF export")
-      context.drawImage(bitmap, 0, 0)
-      const png = await canvas.convertToBlob({ type: "image/png" })
-      return new Uint8Array(await png.arrayBuffer())
-    }
-    const canvas = document.createElement("canvas")
-    canvas.width = bitmap.width
-    canvas.height = bitmap.height
-    const context = canvas.getContext("2d")
-    if (!context) throw new Error("Could not convert WebP image for PDF export")
-    context.drawImage(bitmap, 0, 0)
-    const png = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Could not convert WebP image for PDF export")), "image/png")
-    })
-    canvas.width = 0
-    canvas.height = 0
-    return new Uint8Array(await png.arrayBuffer())
-  } finally {
-    bitmap.close()
-  }
 }
 
 export async function exportTranslatedPdf(options: ExportPdfOptions): Promise<ExportPdfResult> {
@@ -101,21 +76,17 @@ export async function exportTranslatedPdf(options: ExportPdfOptions): Promise<Ex
       throw new Error(`Could not create the PDF because page ${pageMeta.pageNumber} image is missing.`)
     }
 
-    const convertWebp = options.deps?.convertWebpToPng ?? webpToPng
-    const imageBytes = imageBlob.type === "image/webp"
-      ? await convertWebp(imageBlob)
-      : new Uint8Array(await imageBlob.arrayBuffer())
-    const isJpeg = imageBlob.type === "image/jpeg" || imageBlob.type === "image/jpg"
-    const embeddedImage = isJpeg
-      ? await pdfDoc.embedJpg(imageBytes)
-      : await pdfDoc.embedPng(imageBytes)
+    const jpeg = imageBlob.type === "image/jpeg" || imageBlob.type === "image/jpg"
+      ? imageBlob
+      : await cropImageToA4(imageBlob)
+    const embeddedImage = await pdfDoc.embedJpg(await jpeg.arrayBuffer())
 
-    const width = pageMeta.width && pageMeta.width > 0 ? pageMeta.width : embeddedImage.width
-    const height = pageMeta.height && pageMeta.height > 0 ? pageMeta.height : embeddedImage.height
-
-    pdfDoc.addPage([width, height]).drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
+    const scale = Math.max(A4_WIDTH / embeddedImage.width, A4_HEIGHT / embeddedImage.height)
+    const width = embeddedImage.width * scale
+    const height = embeddedImage.height * scale
+    pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]).drawImage(embeddedImage, {
+      x: (A4_WIDTH - width) / 2,
+      y: (A4_HEIGHT - height) / 2,
       width,
       height,
     })

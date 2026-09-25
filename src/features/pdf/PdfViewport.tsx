@@ -1,6 +1,6 @@
 import type { Dispatch, RefObject, SetStateAction } from "react"
 import type { PDFDocumentProxy } from "pdfjs-dist"
-import { FileText, X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw, Sparkles, Columns, Layers, Loader2 } from "lucide-react"
+import { FileText, X, ChevronLeft, ChevronRight, Sparkles, Columns, Layers, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n"
@@ -13,7 +13,6 @@ interface Props {
   fileSize: number
   pageNumber: number
   viewMode: ViewMode
-  zoomLevel: number
   rendering: boolean
   loadingTranslatedImage: boolean
   translatedImageUrl: string | null
@@ -21,7 +20,6 @@ interface Props {
   canvasRef: RefObject<HTMLCanvasElement | null>
   sideCanvasRef: RefObject<HTMLCanvasElement | null>
   setViewMode: Dispatch<SetStateAction<ViewMode>>
-  setZoomLevel: Dispatch<SetStateAction<number>>
   setPageNumber: Dispatch<SetStateAction<number>>
   removeFile: () => void
 }
@@ -32,7 +30,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoomLevel, rendering, loadingTranslatedImage, translatedImageUrl, translationRunning, canvasRef, sideCanvasRef, setViewMode, setZoomLevel, setPageNumber, removeFile }: Props) {
+export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, rendering, loadingTranslatedImage, translatedImageUrl, translationRunning, canvasRef, sideCanvasRef, setViewMode, setPageNumber, removeFile }: Props) {
   const { t } = useI18n()
   return (
             <div className="flex flex-col rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
@@ -100,39 +98,6 @@ export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoo
                     </button>
                   </div>
 
-                  {/* Zoom Controls */}
-                  <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
-                    <button
-                      type="button"
-                      disabled={zoomLevel <= 0.6}
-                      onClick={() => setZoomLevel((z) => Math.max(0.5, Number((z - 0.15).toFixed(2))))}
-                      className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40 cursor-pointer"
-                      title={t("zoomOut")}
-                    >
-                      <ZoomOut className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
-                      {Math.round(zoomLevel * 100)}%
-                    </span>
-                    <button
-                      type="button"
-                      disabled={zoomLevel >= 2.0}
-                      onClick={() => setZoomLevel((z) => Math.min(2.0, Number((z + 0.15).toFixed(2))))}
-                      className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40 cursor-pointer"
-                      title={t("zoomIn")}
-                    >
-                      <ZoomIn className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setZoomLevel(1)}
-                      className="rounded p-1 text-muted-foreground hover:text-foreground cursor-pointer"
-                      title={t("resetZoom")}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
                   {/* Change / Remove File */}
                   <Button
                     type="button"
@@ -161,18 +126,18 @@ export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoo
 
                 {/* View Modes */}
                 {viewMode === "original" && (
-                  <div className="flex justify-center w-full">
+                  <div className="flex aspect-[210/297] w-full max-w-[900px] items-center justify-center bg-white shadow-md">
                     <canvas
                       ref={canvasRef}
                       role="img"
                       aria-label={`Preview of page ${pageNumber} of ${pdf.numPages}`}
-                      className="max-w-full rounded-lg border border-border/80 bg-white shadow-md transition-transform"
+                      className="h-full w-full border border-border/80 bg-white object-contain"
                     />
                   </div>
                 )}
 
                 {viewMode === "translated" && (
-                  <div className="flex flex-col items-center justify-center w-full min-h-[400px]">
+                  <div className="flex aspect-[210/297] w-full max-w-[900px] flex-col items-center justify-center bg-white shadow-md">
                     {loadingTranslatedImage ? (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -182,8 +147,7 @@ export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoo
                       <img
                         src={translatedImageUrl}
                         alt={`Translated page ${pageNumber} of ${pdf.numPages}`}
-                        className="max-w-full rounded-lg border border-border/80 bg-white shadow-md"
-                        style={{ transform: `scale(${zoomLevel})`, transformOrigin: "top center" }}
+                        className="max-h-full max-w-full object-contain"
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/60 p-8 text-center max-w-sm">
@@ -205,12 +169,12 @@ export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoo
                         <Layers className="h-3.5 w-3.5" />
                         <span>{t("originalDoc")}</span>
                       </div>
-                      <div className="flex justify-center w-full overflow-hidden">
+                      <div className="flex aspect-[210/297] w-full items-center justify-center overflow-hidden bg-white">
                         <canvas
                           ref={sideCanvasRef}
                           role="img"
                           aria-label={`Preview of page ${pageNumber} of ${pdf.numPages}`}
-                          className="max-w-full rounded border border-border bg-white shadow-xs"
+                          className="h-full w-full border border-border bg-white object-contain"
                         />
                       </div>
                     </div>
@@ -221,7 +185,7 @@ export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoo
                         <Sparkles className="h-3.5 w-3.5" />
                         <span>{t("translatedDoc")}</span>
                       </div>
-                      <div className="flex flex-col items-center justify-center w-full min-h-[350px]">
+                      <div className="flex aspect-[210/297] w-full flex-col items-center justify-center bg-white">
                         {loadingTranslatedImage ? (
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -231,7 +195,7 @@ export function PdfViewport({ pdf, fileName, fileSize, pageNumber, viewMode, zoo
                           <img
                             src={translatedImageUrl}
                             alt={`Translated page ${pageNumber}`}
-                            className="max-w-full rounded border border-border bg-white shadow-xs"
+                            className="max-h-full max-w-full object-contain"
                           />
                         ) : (
                           <div className="flex flex-col items-center justify-center p-6 text-center">

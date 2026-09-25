@@ -10,9 +10,9 @@ export function pdfDocumentOptions(url: string, baseUrl: string) {
 }
 
 const PDF_POINTS_PER_INCH = 72
-const INPUT_DPI = 240
-const INPUT_ASPECT_WIDTH = 9
-const INPUT_ASPECT_HEIGHT = 16
+const INPUT_DPI = 300
+const INPUT_ASPECT_WIDTH = 2
+const INPUT_ASPECT_HEIGHT = 3
 const MAX_RENDER_PIXELS = 16_000_000
 const MAX_RENDER_DIMENSION = 8192
 const MAX_CANVAS_UNIT = Math.min(

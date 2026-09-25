@@ -71,13 +71,14 @@ export async function retryFailedPages(options: RetryOptions): Promise<void> {
   }
 
   const pages = await getPagesByJob(options.jobId)
-  const failedPages = pages.filter((p) => p.status === "failed")
+  const failedPages = pages.filter((p) => p.status === "failed" || p.retryRequested)
   if (failedPages.length === 0) return
 
   // Reset failed pages to pending
   for (const page of failedPages) {
     await updatePageRecord(job.id, page.pageNumber, {
       status: "pending",
+      retryRequested: false,
       error: undefined,
     })
   }
@@ -223,6 +224,7 @@ export async function retryFailedPages(options: RetryOptions): Promise<void> {
   }
 
   // Resume and poll to completion
+  await recalculateJobProgressFn(job.id)
   await resumeJob({
     jobId: job.id,
     client,

@@ -53,9 +53,8 @@ export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: P
   const [error, setError] = useState("")
   const [translationRunning, setTranslationRunning] = useState(false)
 
-  // Viewport mode & zoom controls
+  // Viewport mode
   const [viewMode, setViewMode] = useState<ViewMode>("original")
-  const [zoomLevel, setZoomLevel] = useState<number>(1)
   const [isDragging, setIsDragging] = useState(false)
 
   // Translated image for current page
@@ -196,7 +195,7 @@ export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: P
       const page = await currentPdf.getPage(pageNumber)
       if (!active || generation !== generationRef.current) return
       const base = page.getViewport({ scale: 1 })
-      const { cssScale, renderScale } = getPreviewScales(
+      const { renderScale } = getPreviewScales(
         base.width,
         base.height,
         window.devicePixelRatio,
@@ -204,8 +203,8 @@ export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: P
       const viewport = page.getViewport({ scale: renderScale })
       currentCanvas.width = Math.max(1, Math.floor(viewport.width))
       currentCanvas.height = Math.max(1, Math.floor(viewport.height))
-      currentCanvas.style.width = `${Math.round(base.width * cssScale * zoomLevel)}px`
-      currentCanvas.style.height = "auto"
+      currentCanvas.style.width = ""
+      currentCanvas.style.height = ""
       const task = page.render({ canvas: currentCanvas, viewport })
       renderTaskRef.current = task
       try {
@@ -226,7 +225,7 @@ export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: P
       active = false
       renderTaskRef.current?.cancel()
     }
-  }, [pdf, pageNumber, zoomLevel, viewMode])
+  }, [pdf, pageNumber, viewMode])
 
   // Look up translated image for current page
   useEffect(() => {
@@ -342,7 +341,6 @@ export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: P
               fileSize={fileSize}
               pageNumber={pageNumber}
               viewMode={viewMode}
-              zoomLevel={zoomLevel}
               rendering={rendering}
               loadingTranslatedImage={loadingTranslatedImage}
               translatedImageUrl={translatedImageUrl}
@@ -350,7 +348,6 @@ export function PdfPreview({ onTranslationRunningChange, onNavigateSettings }: P
               canvasRef={canvasRef}
               sideCanvasRef={sideCanvasRef}
               setViewMode={setViewMode}
-              setZoomLevel={setZoomLevel}
               setPageNumber={setPageNumber}
               removeFile={removeFile}
             />

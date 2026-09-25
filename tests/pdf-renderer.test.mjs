@@ -37,7 +37,7 @@ function fakePdf(pageWidth = 100, pageHeight = 200) {
   }
 }
 
-test("renders the requested page at 240 DPI on a centered 9:16 canvas", async () => {
+test("renders the requested page at 300 DPI on a centered 2:3 canvas", async () => {
   const originalDocument = globalThis.document
   const canvas = {
     width: 0,
@@ -52,14 +52,14 @@ test("renders the requested page at 240 DPI on a centered 9:16 canvas", async ()
     assert.equal(result.pageNumber, 2)
     assert.ok(result.blob instanceof Blob)
     assert.equal(result.blob.type, "image/png")
-    assert.equal(result.width, 378)
-    assert.equal(result.height, 672)
+    assert.equal(result.width, 556)
+    assert.equal(result.height, 834)
     assert.deepEqual(calls.map((call) => call.pageNumber).filter(Boolean), [2])
     assert.equal(calls.length, 2)
-    assert.ok(Math.abs(calls[1].viewport.width - 100 * 240 / 72) < 1e-9)
-    assert.ok(Math.abs(calls[1].viewport.height - 200 * 240 / 72) < 1e-9)
-    assert.ok(Math.abs(calls[1].transform[4] - (378 - 100 * 240 / 72) / 2) < 1e-9)
-    assert.ok(Math.abs(calls[1].transform[5] - (672 - 200 * 240 / 72) / 2) < 1e-9)
+    assert.ok(Math.abs(calls[1].viewport.width - 100 * 300 / 72) < 1e-9)
+    assert.ok(Math.abs(calls[1].viewport.height - 200 * 300 / 72) < 1e-9)
+    assert.ok(Math.abs(calls[1].transform[4] - (556 - 100 * 300 / 72) / 2) < 1e-9)
+    assert.ok(Math.abs(calls[1].transform[5] - (834 - 200 * 300 / 72) / 2) < 1e-9)
     assert.equal(calls[1].background, "white")
     assert.equal(canvas.width, 0)
     assert.equal(canvas.height, 0)

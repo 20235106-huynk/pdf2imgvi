@@ -134,7 +134,7 @@ test("stopping retry before submission leaves pages eligible for another retry",
   assert.deepEqual(pages.map((page) => page.status), ["failed", "failed"])
 })
 
-test("retryFailedPages only re-renders failed pages and creates batch under same jobId", async () => {
+test("retryFailedPages batches failed and marked pages under the same jobId", async () => {
   const storedJob = {
     id: "job-retry-1",
     fileName: "paper.pdf",
@@ -149,7 +149,7 @@ test("retryFailedPages only re-renders failed pages and creates batch under same
   }
 
   const pages = [
-    { jobId: "job-retry-1", pageNumber: 1, status: "completed", createdAt: 0, updatedAt: 0 },
+    { jobId: "job-retry-1", pageNumber: 1, status: "completed", retryRequested: true, createdAt: 0, updatedAt: 0 },
     { jobId: "job-retry-1", pageNumber: 2, status: "failed", error: "Gemini error", createdAt: 0, updatedAt: 0 },
     { jobId: "job-retry-1", pageNumber: 3, status: "completed", createdAt: 0, updatedAt: 0 },
   ]
@@ -168,11 +168,10 @@ test("retryFailedPages only re-renders failed pages and creates batch under same
       rawState: "JOB_STATE_SUCCEEDED",
       responseFile: "files/retry-res",
     }),
-    downloadResults: async () =>
-      JSON.stringify({
-        key: "job-retry-1:page:2",
-        response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa("page2") } }] } }] },
-      }),
+    downloadResults: async () => [1, 2].map((pageNumber) => JSON.stringify({
+      key: `job-retry-1:page:${pageNumber}`,
+      response: { candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: btoa(`page${pageNumber}`) } }] } }] },
+    })).join("\n"),
   }
 
   await retryFailedPages({
@@ -216,15 +215,44 @@ test("retryFailedPages only re-renders failed pages and creates batch under same
     },
   })
 
-  // Only page 2 was failed, so only page 2 should be rendered
-  assert.deepEqual(renderedPages, [2])
+  assert.deepEqual(renderedPages, [1, 2])
   assert.equal(createdBatches.length, 1)
   assert.equal(createdBatches[0].jobId, "job-retry-1")
   assert.equal(createdBatches[0].batchName, "batches/retry-batch-1")
-  assert.deepEqual(createdBatches[0].pageNumbers, [2])
+  assert.deepEqual(createdBatches[0].pageNumbers, [1, 2])
   assert.equal(createdBatches[0].status, "succeeded")
-  assert.equal(savedImages.length, 1)
-  assert.equal(savedImages[0].pNum, 2)
+  assert.deepEqual(savedImages.map((item) => item.pNum), [1, 2])
+})
+
+test("retryFailedPages batches marked completed pages with failed pages", async () => {
+  const controller = new AbortController()
+  const pages = [
+    { jobId: "job-marked", pageNumber: 1, status: "completed", retryRequested: true, translatedImage: new Blob(["old"]) },
+    { jobId: "job-marked", pageNumber: 2, status: "failed" },
+    { jobId: "job-marked", pageNumber: 3, status: "completed" },
+  ]
+  const rendered = []
+  await retryFailedPages({
+    jobId: "job-marked", pdf: { numPages: 3 }, fileName: "paper.pdf", apiKey: "key",
+    settings: { quality: "standard", geminiModel: "gemini-3.1-flash-image", sourceLanguage: "en", targetLanguage: "vi", batchSize: 3, pollingIntervalMs: 10 },
+    signal: controller.signal,
+    deps: {
+      getJob: async () => ({ id: "job-marked", fileName: "paper.pdf", totalPages: 3 }),
+      getPagesByJob: async () => pages,
+      getBatchesByJob: async () => [],
+      updatePageRecord: async (_jobId, pageNumber, patch) => Object.assign(pages[pageNumber - 1], patch),
+      updateJobRecord: async () => {},
+      renderPage: async (_pdf, pageNumber) => {
+        rendered.push(pageNumber)
+        if (rendered.length === 2) controller.abort()
+        return { pageNumber, blob: new Blob([String(pageNumber)], { type: "image/png" }) }
+      },
+      client: { uploadFile: async () => ({ name: "unused", uri: "unused" }) },
+    },
+  })
+  assert.deepEqual(rendered, [1, 2])
+  assert.equal(pages[0].translatedImage.size, 3)
+  assert.equal(pages[2].status, "completed")
 })
 
 test("retry uses stored job's outputQuality and geminiModel instead of current settings", async () => {

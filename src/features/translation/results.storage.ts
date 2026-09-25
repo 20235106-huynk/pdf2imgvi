@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie"
+import { cropImageToA4 } from "../pdf/a4-image.ts"
 
 import type { AppSettings } from "../settings/settings.ts"
 import { jobStatus, type StoredJob, type StoredPage, type TranslationBatchRecord, type PageMetadata, type TranslationJob } from "./model.ts"
@@ -88,14 +89,16 @@ export async function saveCompletedPage(
   pageNumber: number,
   image: Blob,
 ): Promise<void> {
+  const croppedImage = await cropImageToA4(image)
   await database.transaction("rw", database.jobs, database.pages, async () => {
     const job = await database.jobs.get(jobId)
     const page = await database.pages.get([jobId, pageNumber])
     if (!job || !page) throw new Error("Translation job or page no longer exists")
     const now = Date.now()
     await database.pages.update([jobId, pageNumber], {
-      translatedImage: image,
+      translatedImage: croppedImage,
       status: "completed",
+      retryRequested: false,
       error: undefined,
       updatedAt: now,
     })
@@ -180,4 +183,3 @@ export async function clearTranslationCache(): Promise<void> {
     await database.jobs.clear()
   })
 }
-

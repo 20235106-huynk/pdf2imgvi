@@ -24,11 +24,11 @@ export function buildBatchJsonl(
         { file_data: { mime_type: mimeType, file_uri: fileUri } },
       ] }],
       generation_config: {
-        responseModalities: ["TEXT","IMAGE"],
+        responseModalities: ["IMAGE"],
         imageConfig: {
           imageSize: imageSize,
+          aspectRatio: "2:3",
         },
-        "temperature": 0.2,
       },
     },
   })).join("\n")
@@ -87,9 +87,14 @@ export async function parseBatchResults(
       continue
     }
     const image = imageFromResponse(row?.response)
+    const providerError = record(row?.error)
+    const providerMessage = typeof providerError?.message === "string" ? providerError.message : null
+    const providerStatus = typeof providerError?.status === "string" ? providerError.status : null
     results.set(pageNumber, image
       ? { pageNumber, image }
-      : { pageNumber, error: row?.error ? "Gemini failed this page" : "Gemini returned no page image" })
+      : { pageNumber, error: row?.error
+        ? ["Gemini failed this page", providerStatus, providerMessage?.slice(0, 300)].filter(Boolean).join(": ")
+        : "Gemini returned no page image" })
   }
   return expectedPages.map((pageNumber) =>
     results.get(pageNumber) ?? { pageNumber, error: "Gemini returned no result for page" })

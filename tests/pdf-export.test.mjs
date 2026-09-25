@@ -77,7 +77,7 @@ test("throws error if page blob is missing", async () => {
   )
 })
 
-test("sorts out-of-order pages and creates PDF with matching dimensions", async () => {
+test("sorts out-of-order pages and creates A4 PDF pages", async () => {
   const pagesMetadata = [
     { pageNumber: 7, status: "completed", width: 500, height: 700, jobId: "j1", createdAt: 0, updatedAt: 0 },
     { pageNumber: 2, status: "completed", width: 600, height: 800, jobId: "j1", createdAt: 0, updatedAt: 0 },
@@ -92,12 +92,7 @@ test("sorts out-of-order pages and creates PDF with matching dimensions", async 
     deps: {
       getJob: async () => ({ id: "j1", fileName: "sample.pdf" }),
       getPagesByJob: async () => pagesMetadata,
-      getPageImage: async (_j, pNum) => {
-        // Return JPEG for page 5, PNG for others
-        const bytes = pNum === 5 ? ONE_PIXEL_JPEG : ONE_PIXEL_PNG
-        const mime = pNum === 5 ? "image/jpeg" : "image/png"
-        return new Blob([bytes], { type: mime })
-      },
+      getPageImage: async () => new Blob([ONE_PIXEL_JPEG], { type: "image/jpeg" }),
       getSettings: async () => ({ outputFilenameTemplate: "{original}_vi.pdf" }),
     },
   })
@@ -110,16 +105,16 @@ test("sorts out-of-order pages and creates PDF with matching dimensions", async 
   assert.equal(loadedPdf.getPageCount(), 3)
 
   const page1 = loadedPdf.getPage(0)
-  assert.equal(page1.getWidth(), 600)
-  assert.equal(page1.getHeight(), 800)
+  assert.equal(page1.getWidth(), 595.28)
+  assert.equal(page1.getHeight(), 841.89)
 
   const page2 = loadedPdf.getPage(1)
-  assert.equal(page2.getWidth(), 400)
-  assert.equal(page2.getHeight(), 600)
+  assert.equal(page2.getWidth(), 595.28)
+  assert.equal(page2.getHeight(), 841.89)
 
   const page3 = loadedPdf.getPage(2)
-  assert.equal(page3.getWidth(), 500)
-  assert.equal(page3.getHeight(), 700)
+  assert.equal(page3.getWidth(), 595.28)
+  assert.equal(page3.getHeight(), 841.89)
 
   // Verify progress callbacks
   assert.equal(progressEvents.length, 4)
@@ -129,7 +124,7 @@ test("sorts out-of-order pages and creates PDF with matching dimensions", async 
   assert.equal(progressEvents[3].processedPages, 3)
 })
 
-test("exports a translated WebP page by converting it to PNG", async () => {
+test("exports previously saved PNG and WebP pages as JPEG images", async () => {
   const previousBitmap = globalThis.createImageBitmap
   const previousDocument = globalThis.document
   globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} })
@@ -137,22 +132,27 @@ test("exports a translated WebP page by converting it to PNG", async () => {
     createElement: () => ({
       width: 0,
       height: 0,
-      getContext: () => ({ drawImage() {} }),
-      toBlob: (callback) => callback(new Blob([ONE_PIXEL_PNG], { type: "image/png" })),
+      getContext: () => ({ drawImage() {}, fillRect() {} }),
+      toBlob: (callback, type) => callback(new Blob(
+        [type === "image/jpeg" ? ONE_PIXEL_JPEG : ONE_PIXEL_PNG], { type })),
     }),
   }
   try {
-    const result = await exportTranslatedPdf({
-      jobId: "webp-job",
-      deps: {
-        getJob: async () => ({ id: "webp-job", fileName: "doc.pdf" }),
-        getPagesByJob: async () => [{ jobId: "webp-job", pageNumber: 1, status: "completed" }],
-        getPageImage: async () => new Blob([new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80])], { type: "image/webp" }),
-        getSettings: async () => ({ outputFilenameTemplate: "{original}_vi.pdf" }),
-      },
-    })
-    const exported = await PDFDocument.load(await result.blob.arrayBuffer())
-    assert.equal(exported.getPageCount(), 1)
+    for (const mime of ["image/png", "image/webp"]) {
+      const result = await exportTranslatedPdf({
+        jobId: "old-job",
+        deps: {
+          getJob: async () => ({ id: "old-job", fileName: "doc.pdf" }),
+          getPagesByJob: async () => [{ jobId: "old-job", pageNumber: 1, status: "completed" }],
+          getPageImage: async () => new Blob([ONE_PIXEL_PNG], { type: mime }),
+          getSettings: async () => ({ outputFilenameTemplate: "{original}_vi.pdf" }),
+        },
+      })
+      const bytes = Buffer.from(await result.blob.arrayBuffer())
+      const exported = await PDFDocument.load(bytes)
+      assert.equal(exported.getPageCount(), 1)
+      assert.ok(bytes.includes(Buffer.from("/DCTDecode")), `${mime} was not embedded as JPEG`)
+    }
   } finally {
     globalThis.createImageBitmap = previousBitmap
     globalThis.document = previousDocument
