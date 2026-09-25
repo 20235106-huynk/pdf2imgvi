@@ -158,10 +158,18 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
 
   useEffect(() => {
     void refreshJobs().catch(() => setError("Could not load saved translations."))
+    void getApiKey().then((k) => {
+      if (!k || !k.trim()) setMissingApiKeyPrompt(true)
+      else setMissingApiKeyPrompt(false)
+    }).catch(() => {})
     const refresh = () => {
       setViewed(null)
       setSelectedPage(null)
       void refreshJobs().catch(() => setError("Could not load saved translations."))
+      void getApiKey().then((k) => {
+        if (!k || !k.trim()) setMissingApiKeyPrompt(true)
+        else setMissingApiKeyPrompt(false)
+      }).catch(() => {})
       if (jobRef.current) void syncActiveJob(jobRef.current.id)
     }
     window.addEventListener("pdf2imgvi-results-changed", refresh)
@@ -237,6 +245,9 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
     setCancelRequested(false)
     try {
       const [settings, apiKey] = await Promise.all([getSettings(), getApiKey()])
+      if (!apiKey || !apiKey.trim()) {
+        setMissingApiKeyPrompt(true)
+      }
       const validation = translationStartError(pdf, selectedPages, apiKey)
       if (validation) { setError(validation); return }
       if (!pdf || !selectedPages || !apiKey) return
@@ -675,7 +686,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
       {missingApiKeyPrompt && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs space-y-2 text-foreground" role="alert">
           <p className="font-semibold text-amber-700 dark:text-amber-400">Gemini API key required</p>
-          <p>Gemini API key is required to resume or retry this translation.</p>
+          <p>Gemini API key is required to translate, resume, or retry.</p>
           <Button
             type="button"
             size="sm"
