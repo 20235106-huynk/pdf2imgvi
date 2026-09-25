@@ -1,6 +1,23 @@
 import { useEffect, useState, type FormEvent } from "react"
+import {
+  Key,
+  Cpu,
+  Zap,
+  Database,
+  Eye,
+  EyeOff,
+  Save,
+  RotateCcw,
+  ExternalLink,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  Trash2,
+  Loader2,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useI18n } from "@/lib/i18n"
 import { getApiKey, saveApiKey } from "@/storage/api-key.storage"
 import { getSettings, saveSettings } from "@/storage/settings.storage"
 import { clearTranslationCache } from "@/storage/results.storage"
@@ -17,10 +34,11 @@ import {
   type AppSettings,
 } from "@/types/settings"
 
-const controlClass =
-  "mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+const inputClass =
+  "mt-1.5 h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all disabled:opacity-50"
 
 export function SettingsPage({ translationRunning }: { translationRunning: boolean }) {
+  const { t } = useI18n()
   const [draft, setDraft] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [apiKey, setApiKey] = useState("")
   const [showApiKey, setShowApiKey] = useState(false)
@@ -28,6 +46,7 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState("")
+  const [feedbackType, setFeedbackType] = useState<"success" | "error" | "info">("info")
 
   useEffect(() => {
     let active = true
@@ -94,251 +113,447 @@ export function SettingsPage({ translationRunning }: { translationRunning: boole
       await saveApiKey(apiKey, normalized.apiKeyStorageMode)
       setDraft(normalized)
       setApiKey(apiKey.trim())
-      setFeedback("Settings saved")
+      setFeedback(t("saved"))
+      setFeedbackType("success")
     } catch {
-      setFeedback("Could not save settings. Please try again.")
+      setFeedback(t("saveError"))
+      setFeedbackType("error")
     } finally {
       setSaving(false)
     }
   }
 
   if (loading) {
-    return <main className="mx-auto max-w-2xl px-4 py-8">Loading settings…</main>
+    return (
+      <div className="mx-auto flex max-w-3xl items-center justify-center py-20 text-xs text-muted-foreground">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin text-primary" />
+        <span>Loading settings…</span>
+      </div>
+    )
   }
 
   if (loadFailed) {
     return (
-      <main className="mx-auto max-w-2xl px-4 py-8" role="alert">
+      <div className="mx-auto max-w-3xl rounded-2xl border border-destructive/20 bg-destructive/10 p-6 text-center text-xs text-destructive" role="alert">
         Could not load settings. Reload the page to try again.
-      </main>
+      </div>
     )
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h1 className="text-3xl font-semibold">Settings</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Choose how your translations will run.</p>
+    <div className="mx-auto max-w-3xl space-y-6 pb-12">
+      <div>
+        <h1 className="text-xl font-bold tracking-tight">{t("settingsTitle")}</h1>
+        <p className="mt-1 text-xs text-muted-foreground">{t("settingsDesc")}</p>
+      </div>
 
-      <form onSubmit={save} className="mt-8 space-y-8" aria-busy={saving}>
-        <fieldset disabled={saving} className="min-w-0 space-y-8 border-0 p-0">
-        <section className="space-y-5 border-b pb-8" aria-labelledby="engine-heading">
-          <h2 id="engine-heading" className="text-lg font-semibold">Gemini</h2>
-          <label className="block text-sm font-medium" htmlFor="model">
-            Gemini Model
-            <select
-              id="model"
-              className={controlClass}
-              value={draft.geminiModel}
-              onChange={(event) => handleModelChange(event.target.value)}
-            >
-              {MODEL_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+      <form onSubmit={save} className="space-y-6" aria-busy={saving}>
+        <fieldset disabled={saving} className="min-w-0 space-y-6 border-0 p-0">
+          {/* Card 1: API Key & Security */}
+          <section
+            className="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4"
+            aria-labelledby="api-heading"
+          >
+            <div className="flex items-center justify-between border-b border-border/80 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/10 text-primary">
+                  <Key className="h-4 w-4" />
+                </div>
+                <h2 id="api-heading" className="text-sm font-semibold">
+                  {t("apiKeySection")}
+                </h2>
+              </div>
+              {apiKey.trim().length > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Key configured
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                  <AlertCircle className="h-3 w-3" />
+                  Key missing
+                </span>
+              )}
+            </div>
 
-          <div>
-            <label className="text-sm font-medium" htmlFor="api-key">API Key</label>
-            <div className="flex items-end gap-2">
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold" htmlFor="api-key">
+                  {t("apiKeyLabel")}
+                </label>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                >
+                  <span>{t("apiKeyHelp")}</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+
+              <div className="relative mt-1.5 flex items-center">
+                <input
+                  id="api-key"
+                  className={`${inputClass} pr-10`}
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  placeholder="AIzaSy..."
+                  onChange={(event) => {
+                    setApiKey(event.target.value)
+                    setFeedback("")
+                  }}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  aria-pressed={showApiKey}
+                  onClick={() => setShowApiKey((shown) => !shown)}
+                  className="absolute right-2.5 top-3.5 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                  title={showApiKey ? "Hide key" : "Show key"}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <fieldset className="space-y-2 text-xs pt-1">
+              <legend className="mb-1.5 font-semibold text-xs text-foreground">
+                {t("storageMode")}
+              </legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className={`flex items-center gap-2.5 rounded-xl border p-3 cursor-pointer transition-colors ${
+                  draft.apiKeyStorageMode === "local" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+                }`}>
+                  <input
+                    type="radio"
+                    name="api-key-storage"
+                    checked={draft.apiKeyStorageMode === "local"}
+                    onChange={() => update("apiKeyStorageMode", "local")}
+                    className="accent-primary"
+                  />
+                  <div>
+                    <p className="font-semibold text-xs">{t("localStorage")}</p>
+                    <p className="text-[11px] text-muted-foreground">Persists across restarts</p>
+                  </div>
+                </label>
+
+                <label className={`flex items-center gap-2.5 rounded-xl border p-3 cursor-pointer transition-colors ${
+                  draft.apiKeyStorageMode === "session" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+                }`}>
+                  <input
+                    type="radio"
+                    name="api-key-storage"
+                    checked={draft.apiKeyStorageMode === "session"}
+                    onChange={() => update("apiKeyStorageMode", "session")}
+                    className="accent-primary"
+                  />
+                  <div>
+                    <p className="font-semibold text-xs">{t("sessionStorage")}</p>
+                    <p className="text-[11px] text-muted-foreground">Cleared on browser exit</p>
+                  </div>
+                </label>
+              </div>
+            </fieldset>
+          </section>
+
+          {/* Card 2: AI Model & Quality */}
+          <section
+            className="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4"
+            aria-labelledby="ai-heading"
+          >
+            <div className="flex items-center gap-2 border-b border-border/80 pb-3">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                <Cpu className="h-4 w-4" />
+              </div>
+              <h2 id="ai-heading" className="text-sm font-semibold">
+                {t("aiModelSection")}
+              </h2>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold" htmlFor="model">
+                {t("modelLabel")}
+              </label>
+              <select
+                id="model"
+                className={inputClass}
+                value={draft.geminiModel}
+                onChange={(event) => handleModelChange(event.target.value)}
+              >
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold" htmlFor="source-language">
+                  {t("sourceLang")}
+                </label>
+                <select
+                  id="source-language"
+                  className={inputClass}
+                  value={draft.sourceLanguage}
+                  onChange={(event) => update("sourceLanguage", event.target.value)}
+                >
+                  {SOURCE_LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold" htmlFor="target-language">
+                  {t("targetLang")}
+                </label>
+                <select
+                  id="target-language"
+                  className={inputClass}
+                  value={draft.targetLanguage}
+                  onChange={(event) => update("targetLanguage", event.target.value)}
+                >
+                  {TARGET_LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <fieldset className="space-y-2 text-xs pt-1">
+              <legend className="mb-1.5 font-semibold text-xs text-foreground">
+                {t("qualityLabel")}
+              </legend>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <label className={`flex items-center gap-2 rounded-xl border p-3 cursor-pointer transition-colors ${
+                  draft.quality === "standard" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+                }`}>
+                  <input
+                    type="radio"
+                    name="quality"
+                    checked={draft.quality === "standard"}
+                    onChange={() => update("quality", "standard")}
+                    className="accent-primary"
+                  />
+                  <div>
+                    <p className="font-semibold text-xs">Standard (1K)</p>
+                    <p className="text-[10px] text-muted-foreground">Fastest</p>
+                  </div>
+                </label>
+
+                <label className={`flex items-center gap-2 rounded-xl border p-3 cursor-pointer transition-colors ${
+                  draft.quality === "high" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+                } ${draft.geminiModel.includes("lite") ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <input
+                    type="radio"
+                    name="quality"
+                    disabled={draft.geminiModel.includes("lite")}
+                    checked={draft.quality === "high"}
+                    onChange={() => update("quality", "high")}
+                    className="accent-primary"
+                  />
+                  <div>
+                    <p className="font-semibold text-xs">High (2K)</p>
+                    <p className="text-[10px] text-muted-foreground">Crisp text</p>
+                  </div>
+                </label>
+
+                <label className={`flex items-center gap-2 rounded-xl border p-3 cursor-pointer transition-colors ${
+                  draft.quality === "very-high" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+                } ${draft.geminiModel.includes("lite") ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <input
+                    type="radio"
+                    name="quality"
+                    disabled={draft.geminiModel.includes("lite")}
+                    checked={draft.quality === "very-high"}
+                    onChange={() => update("quality", "very-high")}
+                    className="accent-primary"
+                  />
+                  <div>
+                    <p className="font-semibold text-xs">Ultra (4K)</p>
+                    <p className="text-[10px] text-muted-foreground">Max details</p>
+                  </div>
+                </label>
+              </div>
+            </fieldset>
+          </section>
+
+          {/* Card 3: Batch Performance & Output */}
+          <section
+            className="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4"
+            aria-labelledby="perf-heading"
+          >
+            <div className="flex items-center gap-2 border-b border-border/80 pb-3">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <Zap className="h-4 w-4" />
+              </div>
+              <h2 id="perf-heading" className="text-sm font-semibold">
+                {t("performanceSection")}
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold" htmlFor="batch-size">
+                  {t("batchSize")}
+                </label>
+                <input
+                  id="batch-size"
+                  className={inputClass}
+                  type="number"
+                  min={MIN_BATCH_SIZE}
+                  max={MAX_BATCH_SIZE}
+                  step={1}
+                  value={draft.batchSize}
+                  onChange={(event) => update("batchSize", Number(event.target.value))}
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">{t("batchSizeHelp")}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold" htmlFor="polling-interval">
+                  {t("pollingInterval")} (seconds)
+                </label>
+                <input
+                  id="polling-interval"
+                  className={inputClass}
+                  type="number"
+                  min={MIN_POLLING_INTERVAL_MS / 1000}
+                  max={MAX_POLLING_INTERVAL_MS / 1000}
+                  step={1}
+                  value={draft.pollingIntervalMs / 1000}
+                  onChange={(event) => update("pollingIntervalMs", Number(event.target.value) * 1000)}
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">{t("pollingHelp")}</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold" htmlFor="filename-template">
+                Output Filename Pattern
+              </label>
               <input
-                id="api-key"
-                className={controlClass}
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(event) => { setApiKey(event.target.value); setFeedback("") }}
-                autoComplete="off"
-                spellCheck={false}
+                id="filename-template"
+                className={inputClass}
+                value={draft.outputFilenameTemplate}
+                required
+                onChange={(event) => update("outputFilenameTemplate", event.target.value)}
               />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Default: &#123;original&#125;_vi.pdf
+              </p>
+            </div>
+          </section>
+
+          {/* Card 4: Local Storage & Privacy */}
+          <section
+            className="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4"
+            aria-labelledby="storage-heading"
+          >
+            <div className="flex items-center gap-2 border-b border-border/80 pb-3">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                <Database className="h-4 w-4" />
+              </div>
+              <h2 id="storage-heading" className="text-sm font-semibold">
+                {t("storageSection")}
+              </h2>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {t("clearCacheHelp")}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="button"
                 variant="outline"
-                aria-pressed={showApiKey}
-                onClick={() => setShowApiKey((shown) => !shown)}
+                size="sm"
+                disabled={translationRunning}
+                onClick={() => void (async () => {
+                  if (!window.confirm(t("clearCacheConfirm"))) return
+                  try {
+                    await clearTranslationCache()
+                    window.dispatchEvent(new Event("pdf2imgvi-results-changed"))
+                    setFeedback(t("cacheCleared"))
+                    setFeedbackType("info")
+                  } catch {
+                    setFeedback("Could not clear translation cache.")
+                    setFeedbackType("error")
+                  }
+                })()}
+                className="gap-1.5 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
               >
-                {showApiKey ? "Hide" : "Show"}
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("clearCache")}
               </Button>
             </div>
-          </div>
-
-          <fieldset className="space-y-2 text-sm">
-            <legend className="mb-2 font-medium">API Key Storage Mode</legend>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="api-key-storage"
-                checked={draft.apiKeyStorageMode === "local"}
-                onChange={() => update("apiKeyStorageMode", "local")}
-              />
-              Save on this device
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="api-key-storage"
-                checked={draft.apiKeyStorageMode === "session"}
-                onChange={() => update("apiKeyStorageMode", "session")}
-              />
-              Session only
-            </label>
-          </fieldset>
-        </section>
-
-        <section className="space-y-5 border-b pb-8" aria-labelledby="translation-heading">
-          <h2 id="translation-heading" className="text-lg font-semibold">Translation Settings</h2>
-          <label className="block text-sm font-medium" htmlFor="source-language">
-            Source Language
-            <select
-              id="source-language"
-              className={controlClass}
-              value={draft.sourceLanguage}
-              onChange={(event) => update("sourceLanguage", event.target.value)}
-            >
-              {SOURCE_LANGUAGE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm font-medium" htmlFor="target-language">
-            Target Language
-            <select
-              id="target-language"
-              className={controlClass}
-              value={draft.targetLanguage}
-              onChange={(event) => update("targetLanguage", event.target.value)}
-            >
-              {TARGET_LANGUAGE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        </section>
-
-        <fieldset className="space-y-2 border-b pb-8 text-sm">
-          <legend className="mb-2 text-lg font-semibold">Output Quality</legend>
-          {(draft.geminiModel === "gemini-3.1-flash-image" || draft.geminiModel === "gemini-3-pro-image") ? (
-            <>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="quality"
-                  checked={draft.quality === "standard"}
-                  onChange={() => update("quality", "standard")}
-                />
-                <span>Standard <span className="text-xs text-muted-foreground">1K</span></span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="quality"
-                  checked={draft.quality === "high"}
-                  onChange={() => update("quality", "high")}
-                />
-                <span>High <span className="text-xs text-muted-foreground">2K</span></span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="quality"
-                  checked={draft.quality === "very-high"}
-                  onChange={() => update("quality", "very-high")}
-                />
-                <span>Very High <span className="text-xs text-muted-foreground">4K</span></span>
-              </label>
-            </>
-          ) : (
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="quality"
-                checked={true}
-                onChange={() => update("quality", "standard")}
-              />
-              <span>Standard <span className="text-xs text-muted-foreground">1K</span></span>
-            </label>
-          )}
+          </section>
         </fieldset>
 
-        <section className="space-y-4 border-b pb-8" aria-labelledby="batch-heading">
-          <h2 id="batch-heading" className="text-lg font-semibold">Batch Settings</h2>
-          <label className="block text-sm font-medium" htmlFor="batch-size">
-            Pages per batch
-            <input id="batch-size" className={controlClass} type="number"
-              min={MIN_BATCH_SIZE} max={MAX_BATCH_SIZE} step={1} value={draft.batchSize}
-              onChange={(event) => update("batchSize", Number(event.target.value))} />
-          </label>
-          <label className="block text-sm font-medium" htmlFor="polling-interval">
-            Status check interval (seconds)
-            <input id="polling-interval" className={controlClass} type="number"
-              min={MIN_POLLING_INTERVAL_MS / 1000} max={MAX_POLLING_INTERVAL_MS / 1000}
-              step={1} value={draft.pollingIntervalMs / 1000}
-              onChange={(event) => update("pollingIntervalMs", Number(event.target.value) * 1000)} />
-          </label>
-        </section>
-
-        <section className="border-b pb-8" aria-labelledby="output-heading">
-          <h2 id="output-heading" className="text-lg font-semibold">Output Settings</h2>
-          <label className="mt-4 block text-sm font-medium" htmlFor="filename-template">
-            Output Filename
-            <input
-              id="filename-template"
-              className={controlClass}
-              value={draft.outputFilenameTemplate}
-              required
-              onChange={(event) => update("outputFilenameTemplate", event.target.value)}
-            />
-          </label>
-        </section>
-
-        <section className="space-y-3 border-b pb-8" aria-labelledby="storage-heading">
-          <h2 id="storage-heading" className="text-lg font-semibold">Local Storage</h2>
-          <p className="text-sm text-muted-foreground">
-            Translation jobs and completed page images are stored locally. Opening a saved job does not restart Gemini processing.
-          </p>
+        {/* Floating Actions & Feedback */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <Button
             type="button"
             variant="outline"
-            disabled={translationRunning}
-            onClick={() => void (async () => {
-              try {
-                await clearTranslationCache()
-                window.dispatchEvent(new Event("pdf2imgvi-results-changed"))
-                setFeedback("Translation cache cleared.")
-              } catch {
-                setFeedback("Could not clear translation cache.")
-              }
-            })()}
-          >
-            Clear Translation Cache
-          </Button>
-          {translationRunning && <p className="text-sm text-muted-foreground">Finish or cancel the active translation before clearing the cache.</p>}
-        </section>
-
-        <section className="space-y-2 border-b pb-8 text-sm" aria-labelledby="privacy-heading">
-          <h2 id="privacy-heading" className="text-lg font-semibold">Privacy</h2>
-          <p>Your API key uses the storage mode selected above.</p>
-          <p>The source PDF stays on your device; selected pages are rendered and uploaded directly to Gemini.</p>
-          <p>Completed images are stored locally in IndexedDB. No files are uploaded to our servers.</p>
-        </section>
-        </fieldset>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-8">
-          <Button
-            type="button"
-            variant="outline"
+            size="sm"
             disabled={saving}
             onClick={() => {
               setDraft(DEFAULT_SETTINGS)
               setFeedback("Defaults ready. Save Changes to apply.")
+              setFeedbackType("info")
             }}
+            className="gap-1.5 text-xs cursor-pointer"
           >
+            <RotateCcw className="h-3.5 w-3.5" />
             Reset to Defaults
           </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save Changes"}
+
+          <Button
+            type="submit"
+            size="default"
+            disabled={saving}
+            className="gap-2 shadow-xs cursor-pointer font-semibold"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{t("saving")}</span>
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                <span>{t("saveSettings")}</span>
+              </>
+            )}
           </Button>
         </div>
-        <p role="status" aria-live="polite" className="min-h-5 text-sm">{feedback}</p>
+
+        {feedback && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`flex items-center gap-2 rounded-xl p-3 text-xs font-medium ${
+              feedbackType === "success"
+                ? "border border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : feedbackType === "error"
+                ? "border border-destructive/20 bg-destructive/10 text-destructive"
+                : "border border-border bg-muted/40 text-foreground"
+            }`}
+          >
+            {feedbackType === "success" && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+            {feedbackType === "error" && <AlertCircle className="h-4 w-4 shrink-0" />}
+            <span>{feedback}</span>
+          </div>
+        )}
       </form>
-    </main>
+    </div>
   )
 }
