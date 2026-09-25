@@ -621,28 +621,59 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
   const inProgressJob = savedJobs.find((j) => j.status === "submitted" || j.status === "processing")
 
   return (
-    <section className="mt-6 w-full max-w-4xl space-y-4 text-left" aria-label="Translation">
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button type="button" disabled={!pdf || !selectedPages?.length || starting || running}
-          onClick={() => void start()}>
-          {starting ? "Starting…" : "Start Translation"}
-        </Button>
-        {running && runRef.current && (
-          <Button type="button" variant="outline" disabled={cancelling || cancelRequested}
-            onClick={() => void cancel()}>
-            {cancelling ? "Cancelling…" : "Cancel Translation"}
+    <section className="w-full space-y-4 text-left" aria-label="Translation">
+      {/* Primary Action Card */}
+      <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-xs space-y-3">
+        <div className="flex flex-col gap-2">
+          <Button
+            type="button"
+            size="lg"
+            disabled={!pdf || !selectedPages?.length || starting || running}
+            onClick={() => void start()}
+            className="w-full h-10 text-xs font-semibold shadow-xs cursor-pointer"
+          >
+            {starting ? "Starting…" : "Start Translation"}
           </Button>
-        )}
-        {running && (resumingJobId || retryingJobId) && (
-          <Button type="button" variant="outline" onClick={stopPolling}>
-            Stop Polling
-          </Button>
+
+          {running && runRef.current && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={cancelling || cancelRequested}
+              onClick={() => void cancel()}
+              className="w-full text-xs cursor-pointer"
+            >
+              {cancelling ? "Cancelling…" : "Cancel Translation"}
+            </Button>
+          )}
+
+          {running && (resumingJobId || retryingJobId) && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={stopPolling}
+              className="w-full text-xs cursor-pointer"
+            >
+              Stop Polling
+            </Button>
+          )}
+        </div>
+
+        <p className="text-center text-[11px] text-muted-foreground">
+          Selected pages are uploaded directly to Gemini for translation.
+        </p>
+
+        {error && (
+          <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/10 p-2.5 text-center text-xs font-medium text-destructive">
+            {error}
+          </p>
         )}
       </div>
-      <p className="text-center text-sm text-muted-foreground">Selected pages are uploaded directly to Gemini for translation.</p>
-      {error && <p role="alert" className="text-center text-sm text-destructive">{error}</p>}
+
       {missingApiKeyPrompt && (
-        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-2 text-foreground" role="alert">
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs space-y-2 text-foreground" role="alert">
           <p className="font-semibold text-amber-700 dark:text-amber-400">Gemini API key required</p>
           <p>Gemini API key is required to resume or retry this translation.</p>
           <Button
@@ -652,41 +683,45 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
               onNavigateSettings?.()
               window.dispatchEvent(new CustomEvent("pdf2imgvi-navigate-settings"))
             }}
+            className="cursor-pointer"
           >
             Open Settings
           </Button>
         </div>
       )}
+
       {pdfPromptJob && (
-        <div className="rounded-md border border-blue-500/50 bg-blue-500/10 p-4 text-sm space-y-2 text-foreground" role="region" aria-label="PDF selection for retry">
+        <div className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-4 text-xs space-y-2 text-foreground" role="region" aria-label="PDF selection for retry">
           <p className="font-semibold text-blue-700 dark:text-blue-400">Select Original PDF</p>
           <p>Please select the original PDF ({pdfPromptJob.fileName}, {pdfPromptJob.totalPages} pages) to retry failed pages.</p>
           <input
             type="file"
             accept="application/pdf"
-            className="block text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-sm file:font-semibold file:text-primary-foreground hover:file:opacity-90"
+            className="block text-xs text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-semibold file:text-primary-foreground hover:file:opacity-90 cursor-pointer"
             onChange={(e) => void onPdfFileSelected(e)}
           />
-          {pdfFileError && <p role="alert" className="text-sm text-destructive">{pdfFileError}</p>}
+          {pdfFileError && <p role="alert" className="text-xs text-destructive">{pdfFileError}</p>}
           <Button type="button" size="sm" variant="outline" onClick={() => { setPdfPromptJob(null); setPdfFileError("") }}>
             Cancel
           </Button>
         </div>
       )}
+
       {recoveryStatus && (
-        <div className="rounded-md border p-3 text-sm space-y-1.5" aria-live="polite">
+        <div className="rounded-xl border border-border bg-card p-3 text-xs space-y-1.5 shadow-xs" aria-live="polite">
           <div className="flex justify-between font-medium">
             <span>{recoveryStatus}</span>
           </div>
         </div>
       )}
+
       {exportingJobId && exportProgress && (
-        <div className="rounded-md border p-3 text-sm space-y-1.5" aria-live="polite">
-          <div className="flex justify-between font-medium">
+        <div className="rounded-xl border border-border bg-card p-3.5 text-xs space-y-2 shadow-xs" aria-live="polite">
+          <div className="flex justify-between font-semibold">
             <span>Creating PDF…</span>
-            <span>{exportProgress.processedPages} / {exportProgress.totalPages} pages</span>
+            <span className="tabular-nums">{exportProgress.processedPages} / {exportProgress.totalPages} pages</span>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded bg-secondary">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
             <div
               className="h-full bg-primary transition-all duration-200"
               style={{ width: `${Math.round((exportProgress.processedPages / exportProgress.totalPages) * 100)}%` }}
@@ -694,8 +729,9 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
           </div>
         </div>
       )}
+
       {partialConfirm && (
-        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-2 text-foreground" role="alert">
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs space-y-2 text-foreground" role="alert">
           <p className="font-semibold text-amber-700 dark:text-amber-400">Some pages failed to translate</p>
           <p>
             {partialConfirm.completedCount} pages completed, {partialConfirm.failedCount} pages failed.
@@ -707,6 +743,7 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
               size="sm"
               disabled={exportingJobId !== null}
               onClick={() => void handleExport(partialConfirm.jobId, partialConfirm.completedCount, partialConfirm.failedCount, true)}
+              className="cursor-pointer"
             >
               Export {partialConfirm.completedCount} pages
             </Button>
@@ -715,73 +752,110 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
               size="sm"
               variant="outline"
               onClick={() => setPartialConfirm(null)}
+              className="cursor-pointer"
             >
               Cancel
             </Button>
           </div>
         </div>
       )}
+
       {inProgressJob && !job && (
-        <div className="rounded-md border p-4 space-y-2" aria-live="polite">
-          <h3 className="font-semibold">Translation in progress</h3>
-          <p className="font-medium">{inProgressJob.fileName}</p>
-          <p className="text-sm text-muted-foreground">
+        <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-2.5 shadow-xs" aria-live="polite">
+          <h3 className="font-semibold text-sm">Translation in progress</h3>
+          <p className="font-medium text-xs truncate">{inProgressJob.fileName}</p>
+          <p className="text-xs text-muted-foreground">
             {inProgressJob.completedPages} / {inProgressJob.selectedPages.length} pages completed
           </p>
           {resumingJobId === inProgressJob.id ? (
-            <p className="text-sm font-medium text-primary">{recoveryStatus || "Checking Gemini…"}</p>
+            <p className="text-xs font-medium text-primary">{recoveryStatus || "Checking Gemini…"}</p>
           ) : (
-            <p className="text-sm text-muted-foreground">Gemini is processing this document.</p>
+            <p className="text-xs text-muted-foreground">Gemini is processing this document.</p>
           )}
           <div className="flex gap-2 pt-1">
             <Button
               type="button"
+              size="sm"
               disabled={running || exportingJobId !== null}
               onClick={() => void handleResume(inProgressJob.id)}
+              className="cursor-pointer"
             >
               {resumingJobId === inProgressJob.id ? "Resuming…" : "Resume"}
             </Button>
             <Button
               type="button"
+              size="sm"
               variant="outline"
               disabled={running && (resumingJobId === inProgressJob.id || retryingJobId === inProgressJob.id)}
               onClick={() => void removeSaved(inProgressJob.id)}
+              className="cursor-pointer"
             >
               Delete
             </Button>
           </div>
         </div>
       )}
+
       {job && (
-        <div className="rounded-md border p-4" aria-live="polite">
-          <p className="font-medium">{translationProgressLabel(job)}</p>
-          <p>{job.completedPages} completed · {job.failedPages} failed · {job.cancelledPages} cancelled / {job.pages.length} selected</p>
-          <p className="text-sm text-muted-foreground">Batches: {completedBatches} completed · {activeBatches} pending/running · {failedBatches} failed</p>
-          {job.pages.filter((page) => page.error).map((page) =>
-            <p key={page.pageNumber} className="text-sm text-destructive">Page {page.pageNumber}: {page.error}</p>)}
-          <div className="mt-3">
+        <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3 shadow-xs" aria-live="polite">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-sm">{translationProgressLabel(job)}</p>
+            <span className="text-xs font-semibold tabular-nums text-primary">
+              {Math.round((job.completedPages / Math.max(1, job.pages.length)) * 100)}%
+            </span>
+          </div>
+
+          <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+            <div
+              className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 transition-all duration-300"
+              style={{ width: `${Math.round((job.completedPages / Math.max(1, job.pages.length)) * 100)}%` }}
+            />
+          </div>
+
+          <p className="text-xs">
+            {job.completedPages} completed · {job.failedPages} failed · {job.cancelledPages} cancelled / {job.pages.length} selected
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Batches: {completedBatches} completed · {activeBatches} pending/running · {failedBatches} failed
+          </p>
+
+          {job.pages.filter((page) => page.error).map((page) => (
+            <p key={page.pageNumber} className="text-xs text-destructive">
+              Page {page.pageNumber}: {page.error}
+            </p>
+          ))}
+
+          <div className="pt-2">
             {renderJobActions(job)}
           </div>
         </div>
       )}
+
       {savedJobs.length > 0 && (
-        <section className="space-y-4 rounded-md border p-4" aria-label="Saved translations">
-          <h2 className="text-lg font-semibold">Saved translations</h2>
-          {savedJobs.map((saved) => (
-            <div key={saved.id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-              <div>
-                <p className="break-all text-sm font-medium">{saved.fileName}</p>
-                <p className="text-sm text-muted-foreground">{saved.completedPages} / {saved.selectedPages.length} pages completed · {saved.failedPages} failed · {saved.cancelledPages} cancelled · {saved.status.replaceAll("_", " ")}</p>
+        <section className="space-y-3 rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-xs" aria-label="Saved translations">
+          <h2 className="text-sm font-bold tracking-tight">Saved translations</h2>
+          <div className="divide-y divide-border/60">
+            {savedJobs.map((saved) => (
+              <div key={saved.id} className="flex flex-wrap items-center justify-between gap-2.5 py-3 first:pt-1 last:pb-0">
+                <div className="min-w-0 max-w-[200px] sm:max-w-xs">
+                  <p className="truncate text-xs font-semibold" title={saved.fileName}>
+                    {saved.fileName}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {saved.completedPages} / {saved.selectedPages.length} completed · {saved.failedPages} failed · {saved.status.replaceAll("_", " ")}
+                  </p>
+                </div>
+                {renderJobActions(saved, { showView: true, showDelete: true })}
               </div>
-              {renderJobActions(saved, { showView: true, showDelete: true })}
-            </div>
-          ))}
+            ))}
+          </div>
+
           {viewed && (
-            <div className="space-y-3 border-t pt-3">
+            <div className="space-y-3 border-t border-border/80 pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-medium">{viewed.job.fileName}</p>
-                  <p className="text-sm text-muted-foreground">
+                <div className="min-w-0">
+                  <p className="font-semibold text-xs truncate">{viewed.job.fileName}</p>
+                  <p className="text-[11px] text-muted-foreground">
                     {viewed.job.failedPages > 0
                       ? `${viewed.job.failedPages} page(s) failed. Retry Failed Pages will submit a new batch for failed pages.`
                       : "Review translated pages or download completed PDF."}
@@ -789,28 +863,51 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
                 </div>
                 {renderJobActions(viewed.job)}
               </div>
-              <div className="flex flex-wrap gap-2">
+
+              <div className="flex flex-wrap gap-1.5">
                 {viewed.pages.map((page) => (
                   <div key={page.pageNumber} className="flex items-center gap-1">
-                    <Button type="button" variant={selectedPage === page.pageNumber ? "default" : "outline"}
-                      onClick={() => setSelectedPage(page.status === "completed" ? page.pageNumber : null)}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={selectedPage === page.pageNumber ? "default" : "outline"}
+                      onClick={() => setSelectedPage(page.status === "completed" ? page.pageNumber : null)}
+                      className="text-xs h-7 px-2 cursor-pointer"
+                    >
                       Page {page.pageNumber}: {page.status}
                     </Button>
                     {page.status === "completed" && (
-                      <Button type="button" variant="destructive" size="icon"
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
                         disabled={running || exportingJobId !== null}
                         aria-label={`Mark page ${page.pageNumber} for regeneration`}
-                        onClick={() => void markPageForRegeneration(page.pageNumber)}>
+                        onClick={() => void markPageForRegeneration(page.pageNumber)}
+                        className="h-7 w-7 text-xs cursor-pointer"
+                      >
                         ×
                       </Button>
                     )}
                   </div>
                 ))}
               </div>
-              {viewed.pages.filter((page) => page.error).map((page) =>
-                <p key={page.pageNumber} className="text-sm text-destructive">Page {page.pageNumber}: {page.error}</p>)}
-              {selectedPage !== null && resultUrl && <img src={resultUrl} alt={`Translated page ${selectedPage} from ${viewed.job.fileName}`}
-                className="mx-auto max-w-full rounded border bg-white shadow-sm" />}
+
+              {viewed.pages.filter((page) => page.error).map((page) => (
+                <p key={page.pageNumber} className="text-xs text-destructive">
+                  Page {page.pageNumber}: {page.error}
+                </p>
+              ))}
+
+              {selectedPage !== null && resultUrl && (
+                <div className="mt-3 flex justify-center rounded-xl border border-border/80 bg-muted/20 p-3">
+                  <img
+                    src={resultUrl}
+                    alt={`Translated page ${selectedPage} from ${viewed.job.fileName}`}
+                    className="max-w-full rounded-lg border border-border bg-white shadow-sm"
+                  />
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -818,3 +915,4 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
     </section>
   )
 }
+
