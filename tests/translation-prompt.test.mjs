@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { translationPrompt } from "../src/services/translation-prompt.ts"
+import { translationPrompt } from "../src/features/translation/translation-prompt.ts"
 
 test("translation prompt uses language names instead of language codes", () => {
   const prompt = translationPrompt("en", "vi")

@@ -1,5 +1,5 @@
 import type { PDFDocumentProxy } from "pdfjs-dist"
-import type { TranslationJob } from "../types/translation.ts"
+import type { TranslationJob } from "./model.ts"
 
 export function translationStartError(
   pdf: PDFDocumentProxy | null,

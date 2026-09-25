@@ -3,9 +3,20 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 import vm from "node:vm"
 import { transformWithOxc } from "vite"
+import { toTranslationJob } from "../src/features/translation/translation-view-model.ts"
+
+async function runPanel(code, context) {
+  for (const name of ["TranslationProgress", "TranslationHistory"]) {
+    const source = await readFile(new URL(`../src/features/translation/${name}.tsx`, import.meta.url), "utf8")
+    const transformed = await transformWithOxc(source, `${name}.tsx`, { jsx: { runtime: "automatic" } })
+    const componentCode = transformed.code.replace(/^import .*$/gm, "").replace(`export function ${name}`, `function ${name}`)
+    vm.runInNewContext(componentCode, context)
+  }
+  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+}
 
 test("translation start requires a PDF, valid page range, and Gemini API key", async () => {
-  const { translationStartError } = await import("../src/workspace/translation-start.ts")
+  const { translationStartError } = await import("../src/features/translation/translation-start.ts")
   assert.match(translationStartError(null, [1], "key"), /PDF/i)
   assert.match(translationStartError({}, null, "key"), /page range/i)
   assert.match(translationStartError({}, [], "key"), /page range/i)
@@ -14,7 +25,7 @@ test("translation start requires a PDF, valid page range, and Gemini API key", a
 })
 
 test("translation progress labels distinguish preparation, submission, polling, and completion", async () => {
-  const { translationProgressLabel } = await import("../src/workspace/translation-start.ts")
+  const { translationProgressLabel } = await import("../src/features/translation/translation-start.ts")
   const job = { status: "running", stage: "preparing" }
   assert.equal(translationProgressLabel(job), "Preparing pages…")
   assert.equal(translationProgressLabel({ ...job, stage: "submitted" }), "Batch submitted")
@@ -24,10 +35,10 @@ test("translation progress labels distinguish preparation, submission, polling, 
 })
 
 test("a newly completed page refreshes saved images before the whole run finishes", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
   let refreshes = 0
   let finish
   const finished = new Promise((resolve) => { finish = resolve })
@@ -72,7 +83,7 @@ test("a newly completed page refreshes saved images before the whole run finishe
     window: { addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => {} },
     setTimeout,
   }
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
   const tree = context.Panel({ pdf: { numPages: 1 }, fileName: "book.pdf", fileSize: 1024, selectedPages: [1], onRunningChange: () => {} })
   const findStart = (node) => {
     if (!node || typeof node !== "object") return null
@@ -88,10 +99,10 @@ test("a newly completed page refreshes saved images before the whole run finishe
 })
 
 test("renders Download PDF button for saved job with completed pages and triggers export", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   let exportedJobId = null
   let downloadedFilename = null
@@ -111,6 +122,7 @@ test("renders Download PDF button for saved job with completed pages and trigger
   }
 
   const context = {
+    toTranslationJob,
     useEffect: (fn) => fn(),
     useRef: (current) => ({ current }),
     useState: (value) => {
@@ -155,7 +167,7 @@ test("renders Download PDF button for saved job with completed pages and trigger
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
   const tree = context.Panel({ pdf: null, fileName: "", fileSize: 0, selectedPages: null, onRunningChange: () => {} })
 
   const findDownloadBtn = (node) => {
@@ -175,10 +187,10 @@ test("renders Download PDF button for saved job with completed pages and trigger
 })
 
 test("shows partial export confirmation before exporting job with failed pages", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   let exported = false
   const stateMap = new Map()
@@ -253,7 +265,7 @@ test("shows partial export confirmation before exporting job with failed pages",
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
 
   const render = () => {
     stateIndex = 0
@@ -292,10 +304,10 @@ test("shows partial export confirmation before exporting job with failed pages",
 })
 
 test("incomplete or submitted job renders Resume button and triggers resumeJob", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   let resumedJobId = null
   const savedJob = {
@@ -352,7 +364,7 @@ test("incomplete or submitted job renders Resume button and triggers resumeJob",
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
   const tree = context.Panel({ pdf: null, fileName: "", fileSize: 0, selectedPages: null, onRunningChange: () => {} })
 
   const findBtnByText = (node, text) => {
@@ -374,10 +386,10 @@ test("incomplete or submitted job renders Resume button and triggers resumeJob",
 })
 
 test("resuming when API key is missing prompts to open Settings without marking job failed", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   let resumedJobId = null
   let jobMarkedFailed = false
@@ -453,7 +465,7 @@ test("resuming when API key is missing prompts to open Settings without marking 
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
 
   const render = () => {
     stateIndex = 0
@@ -487,10 +499,10 @@ test("resuming when API key is missing prompts to open Settings without marking 
 })
 
 test("job with failed pages renders Retry Failed Pages button and triggers retryFailedPages", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   let retriedJobId = null
   const savedJob = {
@@ -547,7 +559,7 @@ test("job with failed pages renders Retry Failed Pages button and triggers retry
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
   // Matching PDF: doc.pdf, numPages: 3
   const tree = context.Panel({
     pdf: { numPages: 3 },
@@ -576,10 +588,10 @@ test("job with failed pages renders Retry Failed Pages button and triggers retry
 })
 
 test("job with failed pages prompts for original PDF when no matching PDF is loaded", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   const stateMap = new Map()
   let stateIndex = 0
@@ -650,7 +662,7 @@ test("job with failed pages prompts for original PDF when no matching PDF is loa
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
 
   const render = () => {
     stateIndex = 0
@@ -693,10 +705,10 @@ test("job with failed pages prompts for original PDF when no matching PDF is loa
 })
 
 test("retrying failed pages automatically updates active job box to completed when retry finishes", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
 
   const stateMap = new Map()
   let stateIndex = 0
@@ -740,6 +752,7 @@ test("retrying failed pages automatically updates active job box to completed wh
   ]
 
   const context = {
+    toTranslationJob,
     useEffect: (fn) => fn(),
     useRef: (current) => ({ current }),
     useState: (initial) => {
@@ -799,7 +812,7 @@ test("retrying failed pages automatically updates active job box to completed wh
     setTimeout,
   }
 
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
 
   const render = () => {
     stateIndex = 0
@@ -851,10 +864,10 @@ test("retrying failed pages automatically updates active job box to completed wh
 })
 
 test("completed page can be marked for regeneration without starting Gemini", async () => {
-  const source = await readFile(new URL("../src/workspace/TranslationPanel.tsx", import.meta.url), "utf8")
+  const source = await readFile(new URL("../src/features/translation/TranslationPanel.tsx", import.meta.url), "utf8")
   const transformed = await transformWithOxc(source, "TranslationPanel.tsx", { jsx: { runtime: "automatic" } })
   const code = transformed.code.replace(/^import .*$/gm, "").replace("export function TranslationPanel", "function TranslationPanel")
-  const elements = (type, props) => ({ type, props })
+  const elements = (type, props) => typeof type === "function" ? type(props) : { type, props }
   const savedJob = {
     id: "job-regenerate-1",
     fileName: "doc.pdf",
@@ -902,7 +915,7 @@ test("completed page can be marked for regeneration without starting Gemini", as
     translationProgressLabel: () => "Completed",
     window: { addEventListener: () => {}, removeEventListener: () => {} },
   }
-  vm.runInNewContext(`${code}\nglobalThis.Panel = TranslationPanel`, context)
+  await runPanel(code, context)
   const tree = context.Panel({ pdf: null, fileName: "", fileSize: 0, selectedPages: null, onRunningChange: () => {} })
   const findByLabel = (node, label) => {
     if (!node) return null

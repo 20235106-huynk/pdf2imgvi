@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 async function moduleUnderTest() {
-  return import("../src/services/gemini-jsonl.ts")
+  return import("../src/features/translation/gemini-jsonl.ts")
 }
 
 test("splits page numbers into bounded sequential batches", async () => {

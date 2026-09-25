@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { retryFailedPages } from "../src/services/translation-recovery.service.ts"
+import { retryFailedPages } from "../src/features/translation/translation-retry.ts"
 
 test("retry starts every upload in the configured batch while the first is pending", async () => {
   const controller = new AbortController()

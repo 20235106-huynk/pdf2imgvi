@@ -1,10 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { DEFAULT_SETTINGS } from "../src/types/settings.ts"
+import { DEFAULT_SETTINGS } from "../src/features/settings/settings.ts"
 
 async function start(input, ports) {
-  const { startTranslation } = await import("../src/services/translation-job.ts")
+  const { startTranslation } = await import("../src/features/translation/translation-job.ts")
   return startTranslation(input, ports)
 }
 
@@ -337,7 +337,7 @@ test("cancellation interrupts the polling delay but still collects a completed b
 })
 
 test("abortableDelay rejects immediately when aborted", async () => {
-  const { abortableDelay } = await import("../src/services/translation-job.ts")
+  const { abortableDelay } = await import("../src/features/translation/translation-job.ts")
   const controller = new AbortController()
   const waiting = abortableDelay(60000, controller.signal)
   controller.abort()

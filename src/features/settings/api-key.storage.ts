@@ -1,4 +1,4 @@
-import type { ApiKeyStorageMode } from "../types/settings.ts"
+import type { ApiKeyStorageMode } from "./settings.ts"
 
 const API_KEY = "apiKey"
 

@@ -5,9 +5,9 @@ import {
   mapGeminiBatchState,
   reconcileBatch,
   recalculateJobProgress,
-  resumeJob,
-} from "../src/services/translation-recovery.service.ts"
-import { createGeminiBatchClient } from "../src/services/gemini-batch.ts"
+} from "../src/features/translation/translation-reconcile.ts"
+import { resumeJob } from "../src/features/translation/translation-resume.ts"
+import { createGeminiBatchClient } from "../src/features/translation/gemini-batch.ts"
 
 test("mapGeminiBatchState maps every Gemini state to LocalBatchStatus", () => {
   assert.equal(mapGeminiBatchState("JOB_STATE_QUEUED"), "pending")

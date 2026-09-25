@@ -4,8 +4,8 @@ import {
   getJob as defaultGetJob,
   getPagesByJob as defaultGetPagesByJob,
   getPageImage as defaultGetPageImage,
-} from "../storage/results.storage.ts"
-import { getSettings as defaultGetSettings } from "../storage/settings.storage.ts"
+} from "../translation/results.storage.ts"
+import { getSettings as defaultGetSettings } from "../settings/settings.storage.ts"
 
 export interface ExportProgress {
   currentPage: number

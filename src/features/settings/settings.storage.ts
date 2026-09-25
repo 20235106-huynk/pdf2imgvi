@@ -1,4 +1,4 @@
-import { normalizeSettings, type AppSettings } from "../types/settings.ts"
+import { normalizeSettings, type AppSettings } from "./settings.ts"
 
 const SETTINGS_KEY = "appSettings"
 

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { DEFAULT_SETTINGS } from "../src/types/settings.ts"
+import { DEFAULT_SETTINGS } from "../src/features/settings/settings.ts"
 import {
   getSettings,
   resetSettings,
   saveSettings,
-} from "../src/storage/settings.storage.ts"
+} from "../src/features/settings/settings.storage.ts"
 import {
   getApiKey,
   removeApiKey,
   saveApiKey,
-} from "../src/storage/api-key.storage.ts"
+} from "../src/features/settings/api-key.storage.ts"
 
 function storageArea() {
   const values = new Map()

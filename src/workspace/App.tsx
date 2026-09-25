@@ -13,9 +13,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n"
 import { useTheme } from "@/lib/theme"
-import { getApiKey } from "@/storage/api-key.storage"
-import { SettingsPage } from "@/settings/SettingsPage"
-import { PdfPreview } from "./PdfPreview"
+import { getApiKey } from "@/features/settings/api-key.storage"
+import { SettingsPage } from "@/features/settings/SettingsPage"
+import { PdfPreview } from "../features/pdf/PdfPreview"
 
 export function App() {
   const [view, setView] = useState<"translator" | "settings">("translator")

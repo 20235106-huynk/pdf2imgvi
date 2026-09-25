@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { getPreviewScales, MAX_PREVIEW_PIXELS } from "../src/workspace/preview-scale.ts"
+import { getPreviewScales, MAX_PREVIEW_PIXELS } from "../src/features/pdf/preview-scale.ts"
 
 test("ordinary pages stay readable without exceeding the bitmap cap", () => {
   const { cssScale, renderScale } = getPreviewScales(612, 792, 2)

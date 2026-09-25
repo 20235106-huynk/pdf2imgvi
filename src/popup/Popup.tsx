@@ -15,9 +15,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/lib/i18n"
 import { useTheme } from "@/lib/theme"
-import { getApiKey } from "@/storage/api-key.storage"
-import { listJobs, type StoredJob } from "@/storage/results.storage"
-import { exportTranslatedPdf, downloadPdfBlob } from "@/services/pdf-export.service"
+import { getApiKey } from "@/features/settings/api-key.storage"
+import { listJobs } from "@/features/translation/results.storage"
+import type { StoredJob } from "@/features/translation/model"
+import { exportTranslatedPdf, downloadPdfBlob } from "@/features/pdf/pdf-export.service"
 
 type OpenWorkspaceMessage = {
   type: "OPEN_WORKSPACE"

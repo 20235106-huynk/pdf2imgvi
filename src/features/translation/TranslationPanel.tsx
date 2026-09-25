@@ -2,25 +2,29 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react"
 import { getDocument, type PDFDocumentProxy } from "pdfjs-dist"
 
 import { Button } from "@/components/ui/button"
-import { createGeminiBatchClient } from "@/services/gemini-batch"
+import { createGeminiBatchClient } from "@/features/translation/gemini-batch"
 import {
   exportTranslatedPdf,
   downloadPdfBlob,
   type ExportProgress,
-} from "@/services/pdf-export.service"
-import { pdfDocumentOptions, renderPdfPage } from "@/services/pdf-renderer"
-import { abortableDelay, startTranslation } from "@/services/translation-job"
-import { recalculateJobProgress, resumeJob, retryFailedPages } from "@/services/translation-recovery.service"
-import { getApiKey } from "@/storage/api-key.storage"
-import { registerBatch, unregisterBatch } from "@/storage/active-batches.storage"
+} from "@/features/pdf/pdf-export.service"
+import { pdfDocumentOptions, renderPdfPage } from "@/features/pdf/pdf-renderer"
+import { abortableDelay, startTranslation } from "@/features/translation/translation-job"
+import { recalculateJobProgress } from "@/features/translation/translation-reconcile"
+import { resumeJob } from "@/features/translation/translation-resume"
+import { retryFailedPages } from "@/features/translation/translation-retry"
+import { getApiKey } from "@/features/settings/api-key.storage"
+import { registerBatch, unregisterBatch } from "@/features/translation/active-batches.storage"
 import {
   createBatchRecord, createJob, deleteJob, getBatchesByJob, getJob, getPageImage, getPagesByJob, listJobs,
   saveCompletedPage, saveJobSnapshot, updateBatch, updatePageRecord,
-  type LocalBatchStatus, type PageMetadata, type StoredJob, type StoredPage, type TranslationBatchRecord,
-} from "@/storage/results.storage"
-import { getSettings } from "@/storage/settings.storage"
-import type { BatchStatus, TranslationJob } from "@/types/translation"
-import { translationProgressLabel, translationStartError } from "./translation-start"
+} from "@/features/translation/results.storage"
+import { getSettings } from "@/features/settings/settings.storage"
+import type { BatchStatus, LocalBatchStatus, PageMetadata, StoredJob, StoredPage, TranslationBatchRecord, TranslationJob } from "@/features/translation/model"
+import { translationStartError } from "./translation-start"
+import { TranslationProgress } from "./TranslationProgress"
+import { TranslationHistory } from "./TranslationHistory"
+import { toTranslationJob } from "./translation-view-model"
 
 interface Props {
   pdf: PDFDocumentProxy | null
@@ -32,84 +36,8 @@ interface Props {
   loadPdf?: (file: File) => Promise<PDFDocumentProxy>
 }
 
-const TERMINAL_BATCH = new Set(["completed", "failed", "cancelled"])
 const FINISHED_JOB = new Set(["completed", "completed_with_errors", "failed"])
-
-function mapBatchState(status: LocalBatchStatus): BatchStatus {
-  switch (status) {
-    case "succeeded":
-      return "completed"
-    case "failed":
-    case "expired":
-      return "failed"
-    case "cancelled":
-      return "cancelled"
-    case "running":
-      return "running"
-    case "submitted":
-    case "pending":
-    default:
-      return "pending"
-  }
-}
-
-function toTranslationJob(
-  stored: StoredJob,
-  pages: StoredPage[],
-  batches: TranslationBatchRecord[],
-): TranslationJob {
-  const hasFailed = pages.some((p) => p.status === "failed")
-  const allTerminal = pages.length > 0 && pages.every((p) => ["completed", "failed", "cancelled"].includes(p.status))
-
-  let status: TranslationJob["status"] = "running"
-  let stage: TranslationJob["stage"] = "waiting"
-
-  if (allTerminal) {
-    stage = "finished"
-    if (hasFailed || stored.failedPages > 0 || stored.status === "completed_with_errors" || stored.status === "failed") {
-      status = "failed"
-    } else if (pages.every((p) => p.status === "cancelled")) {
-      status = "cancelled"
-    } else {
-      status = "completed"
-    }
-  } else {
-    status = "running"
-    stage = stored.status === "preparing" ? "preparing" : stored.status === "submitted" ? "submitted" : "waiting"
-  }
-
-  const effectivePages: StoredPage[] = pages.length > 0
-    ? pages
-    : stored.selectedPages.map((pageNumber) => ({
-        pageNumber,
-        status: "pending" as const,
-        jobId: stored.id,
-        createdAt: stored.createdAt,
-        updatedAt: stored.updatedAt,
-      }))
-
-  return {
-    id: stored.id,
-    pages: effectivePages.map((p) => ({
-      pageNumber: p.pageNumber,
-      status: p.status,
-      error: p.error,
-      batchId: p.batchName,
-    })),
-    batches: batches.map((b) => ({
-      id: b.batchName || b.id,
-      pageNumbers: b.pageNumbers,
-      state: mapBatchState(b.status),
-    })),
-    completedPages: stored.completedPages,
-    failedPages: stored.failedPages,
-    cancelledPages: stored.cancelledPages,
-    status,
-    stage,
-    geminiModel: stored.geminiModel,
-    outputQuality: stored.outputQuality,
-  }
-}
+const TERMINAL_BATCH = new Set(["completed", "failed", "cancelled"])
 
 export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRunningChange, onNavigateSettings, loadPdf }: Props) {
   const [job, setJob] = useState<TranslationJob | null>(null)
@@ -560,10 +488,6 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
     }
   }
 
-  const completedBatches = job?.batches.filter((batch) => batch.state === "completed").length ?? 0
-  const failedBatches = job?.batches.filter((batch) => batch.state === "failed").length ?? 0
-  const activeBatches = job?.batches.filter((batch) => !TERMINAL_BATCH.has(batch.state)).length ?? 0
-
   function renderJobActions(
     targetJob: StoredJob | { id: string; completedPages: number; failedPages: number; cancelledPages: number; status: string },
     options: { showView?: boolean; showDelete?: boolean } = {}
@@ -807,123 +731,22 @@ export function TranslationPanel({ pdf, fileName, fileSize, selectedPages, onRun
         </div>
       )}
 
-      {job && (
-        <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3 shadow-xs" aria-live="polite">
-          <div className="flex items-center justify-between">
-            <p className="font-semibold text-sm">{translationProgressLabel(job)}</p>
-            <span className="text-xs font-semibold tabular-nums text-primary">
-              {Math.round((job.completedPages / Math.max(1, job.pages.length)) * 100)}%
-            </span>
-          </div>
-
-          <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-            <div
-              className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 transition-all duration-300"
-              style={{ width: `${Math.round((job.completedPages / Math.max(1, job.pages.length)) * 100)}%` }}
-            />
-          </div>
-
-          <p className="text-xs">
-            {job.completedPages} completed · {job.failedPages} failed · {job.cancelledPages} cancelled / {job.pages.length} selected
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Batches: {completedBatches} completed · {activeBatches} pending/running · {failedBatches} failed
-          </p>
-
-          {job.pages.filter((page) => page.error).map((page) => (
-            <p key={page.pageNumber} className="text-xs text-destructive">
-              Page {page.pageNumber}: {page.error}
-            </p>
-          ))}
-
-          <div className="pt-2">
-            {renderJobActions(job)}
-          </div>
-        </div>
-      )}
+      {job && <TranslationProgress job={job} actions={renderJobActions(job)} />}
 
       {savedJobs.length > 0 && (
-        <section className="space-y-3 rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-xs" aria-label="Saved translations">
-          <h2 className="text-sm font-bold tracking-tight">Saved translations</h2>
-          <div className="divide-y divide-border/60">
-            {savedJobs.map((saved) => (
-              <div key={saved.id} className="flex flex-wrap items-center justify-between gap-2.5 py-3 first:pt-1 last:pb-0">
-                <div className="min-w-0 max-w-[200px] sm:max-w-xs">
-                  <p className="truncate text-xs font-semibold" title={saved.fileName}>
-                    {saved.fileName}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {saved.completedPages} / {saved.selectedPages.length} completed · {saved.failedPages} failed · {saved.status.replaceAll("_", " ")}
-                  </p>
-                </div>
-                {renderJobActions(saved, { showView: true, showDelete: true })}
-              </div>
-            ))}
-          </div>
-
-          {viewed && (
-            <div className="space-y-3 border-t border-border/80 pt-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold text-xs truncate">{viewed.job.fileName}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {viewed.job.failedPages > 0
-                      ? `${viewed.job.failedPages} page(s) failed. Retry Failed Pages will submit a new batch for failed pages.`
-                      : "Review translated pages or download completed PDF."}
-                  </p>
-                </div>
-                {renderJobActions(viewed.job)}
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {viewed.pages.map((page) => (
-                  <div key={page.pageNumber} className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={selectedPage === page.pageNumber ? "default" : "outline"}
-                      onClick={() => setSelectedPage(page.status === "completed" ? page.pageNumber : null)}
-                      className="text-xs h-7 px-2 cursor-pointer"
-                    >
-                      Page {page.pageNumber}: {page.status}
-                    </Button>
-                    {page.status === "completed" && (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="icon"
-                        disabled={running || exportingJobId !== null}
-                        aria-label={`Mark page ${page.pageNumber} for regeneration`}
-                        onClick={() => void markPageForRegeneration(page.pageNumber)}
-                        className="h-7 w-7 text-xs cursor-pointer"
-                      >
-                        ×
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {viewed.pages.filter((page) => page.error).map((page) => (
-                <p key={page.pageNumber} className="text-xs text-destructive">
-                  Page {page.pageNumber}: {page.error}
-                </p>
-              ))}
-
-              {selectedPage !== null && resultUrl && (
-                <div className="mt-3 flex justify-center rounded-xl border border-border/80 bg-muted/20 p-3">
-                  <img
-                    src={resultUrl}
-                    alt={`Translated page ${selectedPage} from ${viewed.job.fileName}`}
-                    className="max-w-full rounded-lg border border-border bg-white shadow-sm"
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </section>
+        <TranslationHistory
+          savedJobs={savedJobs}
+          viewed={viewed}
+          selectedPage={selectedPage}
+          resultUrl={resultUrl}
+          running={running}
+          exportingJobId={exportingJobId}
+          renderJobActions={renderJobActions}
+          onSelectPage={setSelectedPage}
+          onRegenerate={markPageForRegeneration}
+        />
       )}
+
     </section>
   )
 }
-

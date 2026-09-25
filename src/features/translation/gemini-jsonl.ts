@@ -1,5 +1,5 @@
-import type { BatchPageResult } from "../types/translation.ts"
-import { QUALITY_TO_IMAGE_SIZE, type OutputQuality } from "../types/settings.ts"
+import type { BatchPageResult } from "./model.ts"
+import { QUALITY_TO_IMAGE_SIZE, type OutputQuality } from "../settings/settings.ts"
 import { translationPrompt } from "./translation-prompt.ts"
 
 export function splitIntoBatches<T>(items: readonly T[], size: number): T[][] {

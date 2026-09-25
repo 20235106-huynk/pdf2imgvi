@@ -1,5 +1,5 @@
 import type { PDFDocumentProxy } from "pdfjs-dist"
-import type { OutputQuality } from "../types/settings"
+import type { OutputQuality } from "../settings/settings"
 
 export function pdfDocumentOptions(url: string, baseUrl: string) {
   return {

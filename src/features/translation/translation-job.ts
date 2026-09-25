@@ -2,10 +2,9 @@ import type { PDFDocumentProxy } from "pdfjs-dist"
 
 import { buildBatchJsonl, parseBatchResults, splitIntoBatches } from "./gemini-jsonl.ts"
 import type { GeminiBatchClient, GeminiBatchStatus } from "./gemini-batch.ts"
-import type { RenderedPage } from "./pdf-renderer.ts"
-import type { AppSettings } from "../types/settings.ts"
-import type { TranslationBatchRecord } from "../storage/results.storage.ts"
-import type { BatchStatus, PageStatus, TranslationJob, TranslationPageJob } from "../types/translation.ts"
+import type { RenderedPage } from "../pdf/pdf-renderer.ts"
+import type { AppSettings } from "../settings/settings.ts"
+import type { BatchStatus, PageStatus, TranslationBatchRecord, TranslationJob, TranslationPageJob } from "./model.ts"
 
 export interface TranslationInput {
   pdf: PDFDocumentProxy

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai"
 
-import { MODEL_OPTIONS } from "../types/settings.ts"
-import type { BatchStatus } from "../types/translation.ts"
+import { MODEL_OPTIONS } from "../settings/settings.ts"
+import type { BatchStatus } from "./model.ts"
 
 const API = "https://generativelanguage.googleapis.com"
 const FILE_NAME = /^files\/[A-Za-z0-9_-]+$/

@@ -51,7 +51,7 @@ npm run build
 
 `npm run build` kiểm tra TypeScript rồi tạo tiện ích trong `dist/`. `npm run dev` khởi động Vite để phát triển giao diện; các thao tác dùng Chrome Extension API cần được kiểm tra trong tiện ích đã nạp vào Chrome.
 
-Mã nguồn chính nằm trong `src/workspace/` (giao diện dịch), `src/services/` (render PDF, Gemini, khôi phục và xuất PDF), `src/storage/` (lưu trữ cục bộ) và `src/settings/` (cài đặt). Các kiểm tra tự động nằm trong `tests/`.
+Mã nguồn được nhóm theo tính năng: `src/features/pdf/` (xem, render và xuất PDF), `src/features/translation/` (Gemini, job, khôi phục, dữ liệu và giao diện dịch) và `src/features/settings/` (cài đặt và API key). `src/workspace/`, `src/popup/` và `src/background/` là các điểm vào của tiện ích; thành phần dùng chung nằm trong `src/components/` và `src/lib/`. Các kiểm tra tự động nằm trong `tests/`.
 
 ## Giới hạn hiện tại
 

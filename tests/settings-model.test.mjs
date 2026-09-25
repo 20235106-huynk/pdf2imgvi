@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import * as settings from "../src/types/settings.ts"
+import * as settings from "../src/features/settings/settings.ts"
 
 const {
   DEFAULT_SETTINGS,

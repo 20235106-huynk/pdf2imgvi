@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { parsePageRange } from "../src/workspace/page-selection.ts"
+import { parsePageRange } from "../src/features/pdf/page-selection.ts"
 
 test("accepts ranges and individual pages in document order", () => {
   assert.deepEqual(parsePageRange("1-3, 5, 8-10", 10), [1, 2, 3, 5, 8, 9, 10])

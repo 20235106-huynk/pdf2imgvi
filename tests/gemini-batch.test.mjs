@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { createGeminiBatchClient } from "../src/services/gemini-batch.ts"
+import { createGeminiBatchClient } from "../src/features/translation/gemini-batch.ts"
 
 test("uses the Gemini SDK for upload, submit, status, and cancellation", async () => {
   const calls = []

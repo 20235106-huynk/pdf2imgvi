@@ -17,7 +17,7 @@ function installSession() {
 
 test("active batch registry isolates tabs and removes only the closed tab's IDs", async () => {
   const values = installSession()
-  const { registerBatch, unregisterBatch, takeTabBatches } = await import("../src/storage/active-batches.storage.ts")
+  const { registerBatch, unregisterBatch, takeTabBatches } = await import("../src/features/translation/active-batches.storage.ts")
 
   await registerBatch(9, "batches/a")
   await registerBatch(9, "batches/b")
@@ -32,7 +32,7 @@ test("active batch registry isolates tabs and removes only the closed tab's IDs"
 
 test("registry never stores API keys and rejects malformed batch IDs", async () => {
   const values = installSession()
-  const { registerBatch } = await import("../src/storage/active-batches.storage.ts")
+  const { registerBatch } = await import("../src/features/translation/active-batches.storage.ts")
   await assert.rejects(registerBatch(9, "../secret"), /batch/i)
   await registerBatch(9, "batches/valid")
   assert.equal(JSON.stringify([...values]), '[["activeBatches:9",["batches/valid"]]]')

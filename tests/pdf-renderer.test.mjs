@@ -1,10 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { renderPdfPage } from "../src/services/pdf-renderer.ts"
+import { renderPdfPage } from "../src/features/pdf/pdf-renderer.ts"
 
 test("PDF loading reports errors without noisy recoverable font warnings", async () => {
-  const module = await import("../src/services/pdf-renderer.ts")
+  const module = await import("../src/features/pdf/pdf-renderer.ts")
   assert.equal(typeof module.pdfDocumentOptions, "function")
   assert.deepEqual(
     module.pdfDocumentOptions("blob:document", "chrome-extension://extension/workspace.html"),
